@@ -21,6 +21,7 @@ go.work.sum
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -28,7 +29,24 @@ Thumbs.db
 
 # Environment
 .env
-.env.local
+.env.*
+!.env.example
+
+# Secrets / credentials
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+
+# Claude Code sub-package instructions
+docs/CLAUDE.md
+fake/CLAUDE.md
+jwks/CLAUDE.md
+middleware/CLAUDE.md
 
 # Vendor (optional)
 # vendor/
+
+# Debug
+__debug_bin*

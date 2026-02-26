@@ -1,27 +1,28 @@
 # iam-go
 
-Go SDK for [Valhalla IAM](https://github.com/haticestudio/valhalla) — Authentication, Authorization, and Multi-tenancy client library.
+Go SDK for Identity and Access Management — Authentication, Authorization, and Multi-tenancy client library.
 
 ## Overview
 
-`iam-go` provides a unified Go client for integrating with Valhalla's centralized IAM service. It enables any Go service to:
+`iam-go` provides a unified Go client for integrating with centralized IAM services. It enables any Go service to:
 
 - **Verify JWT tokens** locally via JWKS (RS256 public key)
-- **Check permissions** via gRPC with local caching
+- **Check permissions** with local caching
 - **Manage API Keys** for service-to-service authentication
 - **Inject tenant context** automatically via middleware
-- **Audit trail** integration
+
+The SDK is **backend-agnostic** — all services are defined as interfaces. Concrete implementations (gRPC, REST, in-memory) are injected via the Option pattern.
 
 ## Architecture
 
 ```
 Your Service (e.g., workforce-saas)
     │
-    ├── middleware.GinAuth()       ← JWT verification (local, via JWKS public key)
-    ├── middleware.GinTenant()     ← Tenant context injection
-    ├── middleware.GinRequire()    ← Permission check (gRPC → Valhalla IAM)
+    ├── middleware.GinAuth(client)       ← JWT verification (local, via JWKS)
+    ├── middleware.GinTenant(client)     ← Tenant context injection
+    ├── middleware.GinRequire(client, p) ← Permission check
     │
-    └── client.Authz().Check()    ← Direct permission query
+    └── client.Authz().Check()          ← Direct permission query
         client.Users().GetCurrent()
         client.Secrets().Verify()
 ```
@@ -43,13 +44,17 @@ import (
 )
 
 func main() {
-    // Initialize IAM client
-    client, err := iam.NewClient(iam.Config{
-        Endpoint:  "valhalla-iam:9000",        // gRPC endpoint
-        JWKSUrl:   "http://valhalla:8080/.well-known/jwks.json",
-        APIKey:    os.Getenv("IAM_API_KEY"),
-        APISecret: os.Getenv("IAM_API_SECRET"),
-    })
+    // Initialize IAM client with injected implementations
+    client, err := iam.NewClient(
+        iam.Config{
+            Endpoint: "iam-server:9000",
+            JWKSUrl:  "https://auth.example.com/.well-known/jwks.json",
+            APIKey:   os.Getenv("IAM_API_KEY"),
+            APISecret: os.Getenv("IAM_API_SECRET"),
+        },
+        iam.WithTokenVerifier(myVerifier),
+        iam.WithAuthorizer(myAuthz),
+    )
     if err != nil {
         log.Fatal(err)
     }
@@ -73,22 +78,30 @@ func main() {
 
 | Package | Description |
 |---------|-------------|
-| `iam-go` (root) | Client initialization, configuration |
+| `iam-go` (root) | Client, Config, Option pattern, interfaces, domain types |
 | `middleware/` | Gin, Kratos, gRPC middleware/interceptors |
-| `jwks/` | JWKS public key fetching and caching |
-| `authz/` | Authorization decision client |
-| `secret/` | API Key/Secret management client |
-| `tenant/` | Tenant context and resolution |
-| `user/` | User management client |
-| `session/` | Session management client |
-| `fake/` | In-memory fake implementations for testing |
-| `proto/` | Generated gRPC stubs (lightweight) |
+| `jwks/` | JWKS-based TokenVerifier (standard RFC 7517) |
+| `fake/` | In-memory implementations for testing |
+| `proto/` | Generated gRPC stubs (optional) |
+
+## Core Interfaces
+
+The root package defines these interfaces — implement them to integrate with any IAM backend:
+
+| Interface | Purpose |
+|-----------|---------|
+| `TokenVerifier` | Verify tokens, extract claims |
+| `Authorizer` | Check permissions (with caching) |
+| `UserService` | User CRUD and role queries |
+| `TenantService` | Tenant resolution and membership |
+| `SessionService` | Session management |
+| `SecretService` | API key/secret lifecycle |
 
 ## Authentication Methods
 
 ### JWT Token (for end users)
 ```go
-// Middleware automatically verifies JWT via JWKS
+// Middleware verifies JWT via any JWKS-compliant endpoint
 router.Use(middleware.GinAuth(client))
 ```
 
@@ -96,7 +109,7 @@ router.Use(middleware.GinAuth(client))
 ```go
 // Service-to-service authentication
 client, _ := iam.NewClient(iam.Config{
-    Endpoint:  "valhalla-iam:9000",
+    Endpoint:  "iam-server:9000",
     APIKey:    os.Getenv("IAM_API_KEY"),
     APISecret: os.Getenv("IAM_API_SECRET"),
 })

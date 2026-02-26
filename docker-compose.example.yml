@@ -1,0 +1,91 @@
+# Example Docker Compose for integration testing iam-go SDK
+#
+# This file demonstrates how to set up an integration test environment.
+# To use this:
+#   1. Replace 'valhalla-iam' with your actual IAM server image
+#   2. Ensure the IAM server exposes JWKS at /.well-known/jwks.json
+#   3. Configure environment variables for database and service URLs
+#
+# Usage:
+#   docker-compose -f docker-compose.example.yml up -d
+#   go test -tags=integration ./integration_tests/...
+#   docker-compose -f docker-compose.example.yml down
+
+version: '3.8'
+
+services:
+  # IAM Server (replace with your actual IAM server image)
+  iam:
+    image: valhalla-iam:latest  # Example: your IAM server
+    container_name: iam-server
+    environment:
+      DATABASE_URL: postgres://iam_user:iam_password@postgres:5432/iam_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-secret-key-here
+      RS256_PRIVATE_KEY: /run/secrets/private_key
+      LOG_LEVEL: debug
+    ports:
+      - "127.0.0.1:8080:8080"  # gRPC/HTTP endpoint
+      - "127.0.0.1:8081:8081"  # Health check
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - iam-network
+    secrets:
+      - private_key
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: iam-postgres
+    environment:
+      POSTGRES_DB: iam_db
+      POSTGRES_USER: iam_user
+      POSTGRES_PASSWORD: iam_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - iam-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iam_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: iam-redis
+    command: redis-server --requirepass redis_password
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - iam-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  iam-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+secrets:
+  private_key:
+    file: ./secrets/private_key.pem

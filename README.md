@@ -4,25 +4,40 @@ Go SDK for Identity and Access Management — Authentication, Authorization, and
 
 ## Overview
 
-`iam-go` provides a unified Go client for integrating with centralized IAM services. It enables any Go service to:
+`iam-go` is a Go SDK for integrating with **any IAM server** that implements the standard Identity and Access Management capabilities. It enables any Go service to:
 
-- **Verify JWT tokens** locally via JWKS (RS256 public key)
+- **Verify JWT tokens** locally via JWKS (RS256 public key) — no network calls
 - **Check permissions** with local caching
 - **Manage API Keys** for service-to-service authentication
 - **Inject tenant context** automatically via middleware
 
 The SDK is **backend-agnostic** — all services are defined as interfaces. Concrete implementations (gRPC, REST, in-memory) are injected via the Option pattern.
 
+> **What is a "Standard IAM Server"?**
+>
+> Any IAM server that implements the **P0 Requirements** (see [Roadmap](docs/ROADMAP.md)):
+> - **P0.1**: RS256 JWT signing + JWKS endpoint
+> - **P0.2**: API Key/Secret management service
+> - **P0.3**: IAM service API for external token verification and permission checking
+>
+> Once your IAM server implements these, any service using `iam-go` can authenticate and authorize without vendor lock-in.
+
+**Architecture:** Kratos + Proto-first
+
+> **Architecture Rule:** This SDK is built on **go-kratos/kratos** with Proto-first API design.
+> Gin, Echo, Chi, and other HTTP frameworks are intentionally excluded.
+> Kratos middleware handles both HTTP and gRPC transports — no need for framework-specific adapters.
+
 ## Architecture
 
 ```
-Your Service (e.g., workforce-saas)
+Your Service (Kratos-based)
     │
-    ├── middleware.GinAuth(client)       ← JWT verification (local, via JWKS)
-    ├── middleware.GinTenant(client)     ← Tenant context injection
-    ├── middleware.GinRequire(client, p) ← Permission check
-    │
-    └── client.Authz().Check()          ← Direct permission query
+    ├── kratosmw.Auth(client)          ← JWT verification (local, via JWKS)
+    ├── kratosmw.Tenant(client)        ← Tenant context injection
+    ├── kratosmw.Require(client, p)    ← Permission check
+    │                                    (works with both HTTP and gRPC)
+    └── client.Authz().Check()         ← Direct permission query
         client.Users().GetCurrent()
         client.Secrets().Verify()
 ```
@@ -40,7 +55,8 @@ package main
 
 import (
     iam "github.com/chimerakang/iam-go"
-    "github.com/chimerakang/iam-go/middleware"
+    "github.com/chimerakang/iam-go/middleware/kratosmw"
+    "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func main() {
@@ -60,16 +76,12 @@ func main() {
     }
     defer client.Close()
 
-    // Gin middleware example
-    router := gin.Default()
-    router.Use(middleware.GinAuth(client))      // Verify JWT
-    router.Use(middleware.GinTenant(client))     // Inject tenant context
-
-    // Protected route with permission check
-    api := router.Group("/api/v1")
-    api.GET("/records",
-        middleware.GinRequire(client, "attendance:record:read"),
-        handleListRecords,
+    // Kratos HTTP server with IAM middleware
+    httpSrv := http.NewServer(
+        http.Middleware(
+            kratosmw.Auth(client),
+            kratosmw.Tenant(client),
+        ),
     )
 }
 ```
@@ -78,11 +90,12 @@ func main() {
 
 | Package | Description |
 |---------|-------------|
-| `iam-go` (root) | Client, Config, Option pattern, interfaces, domain types |
-| `middleware/` | Gin, Kratos, gRPC middleware/interceptors |
+| `iam-go` (root) | Client, Config, Option pattern, interfaces, domain types, context helpers |
+| `middleware/kratosmw/` | Kratos middleware — Auth, Tenant, Require (HTTP + gRPC) |
+| `middleware/grpcmw/` | Pure gRPC interceptors (for non-Kratos services) |
 | `jwks/` | JWKS-based TokenVerifier (standard RFC 7517) |
 | `fake/` | In-memory implementations for testing |
-| `proto/` | Generated gRPC stubs (optional) |
+| `proto/iam/v1/` | Proto service definitions and generated gRPC stubs |
 
 ## Core Interfaces
 
@@ -101,18 +114,23 @@ The root package defines these interfaces — implement them to integrate with a
 
 ### JWT Token (for end users)
 ```go
-// Middleware verifies JWT via any JWKS-compliant endpoint
-router.Use(middleware.GinAuth(client))
+// Kratos middleware verifies JWT via any JWKS-compliant endpoint
+kratosmw.Auth(client)
 ```
 
 ### API Key/Secret (for services)
 ```go
-// Service-to-service authentication
-client, _ := iam.NewClient(iam.Config{
-    Endpoint:  "iam-server:9000",
-    APIKey:    os.Getenv("IAM_API_KEY"),
-    APISecret: os.Getenv("IAM_API_SECRET"),
-})
+// Service-to-service authentication via header
+kratosmw.APIKey(client)
+```
+
+## Proto-first Development
+
+Service contracts are defined in `proto/iam/v1/iam.proto`. Generate Go stubs with:
+
+```bash
+make proto       # Generate gRPC stubs
+make proto-lint  # Lint proto files
 ```
 
 ## Testing
@@ -123,12 +141,24 @@ Use the `fake` package for unit tests without a real IAM server:
 import "github.com/chimerakang/iam-go/fake"
 
 func TestMyHandler(t *testing.T) {
-    client := fake.NewClient(fake.WithUser("user1", "tenant1", []string{"admin"}))
+    client := fake.NewClient(
+        fake.WithUser("user1", "tenant1", "user1@test.com", []string{"admin"}),
+        fake.WithPermissions("user1", []string{"users:read"}),
+    )
 
-    // Use client in tests — no network calls
+    ctx := fake.ContextWithUserID(context.Background(), "user1")
     ok, _ := client.Authz().Check(ctx, "users:read")
-    assert.True(t, ok)
+    // ok == true
 }
+```
+
+## Build
+
+```bash
+make build       # go build ./...
+make test        # go test ./...
+make lint        # go vet ./...
+make proto       # buf generate
 ```
 
 ## License

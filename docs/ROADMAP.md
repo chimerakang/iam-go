@@ -2,170 +2,160 @@
 
 ## Project Goal
 
-Build a Go SDK that enables any Go service to integrate with Valhalla's centralized IAM, providing:
-- Token verification (JWT via JWKS)
-- Permission checking (gRPC with local caching)
+Build a Kratos + Proto-first Go SDK for Identity and Access Management, providing:
+- Token verification (JWT via JWKS, standard RFC 7517)
+- Permission checking (with local caching)
 - API Key authentication (service-to-service)
 - Multi-tenancy context injection
-- Middleware for popular frameworks (Gin, Kratos, gRPC)
+- Middleware for Kratos (primary) and pure gRPC
+
+The SDK defines **interfaces** backed by **proto service definitions** — concrete backends (gRPC, REST, etc.) are injected via the Option pattern.
 
 ---
 
-## Phase 0: Foundation (Valhalla-side Prerequisites)
+## Phase 0: Foundation (Server-side Prerequisites)
 
-Before the SDK can work, Valhalla IAM needs these server-side features:
+Before the SDK can be used, the IAM server needs these capabilities:
 
 ### P0.1 RS256 JWT Signing + JWKS Endpoint
-**Priority:** Critical | **Effort:** 2-3 days | **Location:** Valhalla repo
+**Priority:** Critical | **Effort:** 2-3 days | **Location:** IAM server repo
 
 - [ ] Generate RSA key pair for JWT signing
-- [ ] Switch JWT signing from HS256 to RS256
+- [ ] Sign JWTs with RS256 (not HS256)
 - [ ] Implement `GET /.well-known/jwks.json` endpoint
 - [ ] Key rotation support (multiple active keys)
-- [ ] Update existing middleware to support RS256 verification
 
 ### P0.2 API Key/Secret Management
-**Priority:** Critical | **Effort:** 3-4 days | **Location:** Valhalla repo
+**Priority:** Critical | **Effort:** 3-4 days | **Location:** IAM server repo
 
-- [ ] Proto definition: `SecretService` (Create, List, Delete, Verify, Rotate)
-- [ ] Database migration: `api_secrets` table
-- [ ] Biz layer: SecretUseCase (generation, hashing, verification)
-- [ ] Service layer: gRPC implementation
-- [ ] API Key authentication middleware (alternative to JWT)
+- [ ] Secret CRUD: Create, List, Delete, Verify, Rotate
+- [ ] Database: `api_secrets` table
+- [ ] API Key authentication as alternative to JWT
 - [ ] Rate limiting per API key
 
-### P0.3 IAM gRPC Service for External Consumers
-**Priority:** Critical | **Effort:** 2-3 days | **Location:** Valhalla repo
+### P0.3 IAM Service for External Consumers
+**Priority:** Critical | **Effort:** 2-3 days | **Location:** IAM server repo
 
-- [ ] Proto definition: `IAMService` (IntrospectToken, CheckPermission, GetUserPermissions, ValidateTenantMembership)
-- [ ] Service layer implementation
-- [ ] Expose gRPC port for external services (already partially done: Issue #133)
+- [ ] Endpoints: IntrospectToken, CheckPermission, GetUserPermissions, ValidateTenantMembership
+- [ ] Expose service port for external consumers
 - [ ] Authentication via API Key for service-to-service calls
 
 ---
 
 ## Phase 1: Core SDK
 
-### P1.1 JWKS Client
+### P1.1 JWKS Client (TokenVerifier)
 **Priority:** Critical | **Effort:** 2 days | **Package:** `jwks/`
 
-- [ ] Fetch JWKS from configurable URL
-- [ ] Parse RSA public keys from JWK format
-- [ ] Cache keys in memory with configurable refresh interval
-- [ ] Auto-refresh on key rotation (kid mismatch)
-- [ ] Verify JWT signature using cached public key
-- [ ] Extract standard claims (sub, iss, exp, tenant_id, roles)
-- [ ] Unit tests with fake JWKS server
+- [x] Fetch JWKS from configurable URL
+- [x] Parse RSA public keys from JWK format
+- [x] Cache keys in memory with configurable refresh interval
+- [x] Auto-refresh on key rotation (kid mismatch)
+- [x] Verify JWT signature using cached public key
+- [x] Extract standard claims (sub, iss, exp, tenant_id, roles) → `iam.Claims`
+- [x] Implement `iam.TokenVerifier` interface
+- [x] Unit tests with fake JWKS server
 
 ### P1.2 Client Core
 **Priority:** Critical | **Effort:** 1-2 days | **Package:** root
 
-- [ ] `Config` struct with validation
-- [ ] gRPC connection management (dial, keepalive, retry)
-- [ ] API Key authentication interceptor
+- [x] `Config` struct with validation
+- [x] Option pattern for injecting service implementations
+- [x] Accessor methods: `Verifier()`, `Authz()`, `Users()`, `Tenants()`, `Sessions()`, `Secrets()`
+- [x] Context helpers: `WithUserID()`, `UserIDFromContext()`, etc.
 - [ ] Connection health check
 - [ ] Graceful shutdown (Close)
 - [ ] Context propagation (timeout, cancellation)
 
-### P1.3 Authorization Client
-**Priority:** Critical | **Effort:** 2 days | **Package:** `authz/`
+### P1.3 Interfaces & Types
+**Priority:** Critical | **Effort:** Done | **Package:** root
 
-- [ ] `Check(ctx, permission)` → bool
-- [ ] `CheckResource(ctx, resource, action)` → bool
-- [ ] `GetUserPermissions(ctx)` → []string
-- [ ] Local cache with configurable TTL (default 5 min)
-- [ ] Cache invalidation on permission change
-- [ ] Batch permission check support
-- [ ] Unit tests with fake server
+- [x] `TokenVerifier` interface
+- [x] `Authorizer` interface (Check, CheckResource, GetPermissions)
+- [x] `UserService` interface
+- [x] `TenantService` interface
+- [x] `SessionService` interface
+- [x] `SecretService` interface
+- [x] Domain types: Claims, User, Role, Tenant, Session, Secret, ListOptions
 
-### P1.4 Secret Client
-**Priority:** High | **Effort:** 1-2 days | **Package:** `secret/`
+### P1.4 Proto Definitions
+**Priority:** Critical | **Effort:** Done | **Package:** `proto/iam/v1/`
 
-- [ ] `Create(ctx, description)` → (apiKey, apiSecret)
-- [ ] `List(ctx)` → []Secret
-- [ ] `Delete(ctx, secretID)` → error
-- [ ] `Verify(ctx, apiKey, apiSecret)` → (claims, error)
-- [ ] `Rotate(ctx, secretID)` → (newSecret)
+- [x] Define proto service contracts (AuthzService, UserService, TenantService, SessionService, SecretService)
+- [x] Define proto message types aligned with Go domain types
+- [x] `buf.yaml` and `buf.gen.yaml` configuration
+- [x] Makefile targets for proto generation
+- [ ] Generate Go stubs from proto
+- [ ] Conversion functions between proto and domain types
 
 ---
 
 ## Phase 2: Middleware
 
-### P2.1 Gin Middleware
-**Priority:** Critical | **Effort:** 2-3 days | **Package:** `middleware/`
+### P2.1 Kratos Middleware (Primary)
+**Priority:** Critical | **Effort:** 2-3 days | **Package:** `middleware/kratosmw/`
 
-- [ ] `GinAuth(client)` — JWT verification via JWKS, injects user context
-- [ ] `GinTenant(client)` — Extracts tenant_id, validates membership
-- [ ] `GinRequire(client, permission)` — Permission gate
-- [ ] `GinRequireAny(client, ...permissions)` — Any-of permission gate
-- [ ] `GinAPIKey(client)` — API Key authentication (for service endpoints)
-- [ ] Context helpers: `GetUserID(c)`, `GetTenantID(c)`, `GetRoles(c)`
-- [ ] Excluded paths configuration (public routes)
+- [x] `Auth(client)` — JWT verification via `client.Verifier()`, injects user context
+- [x] `Tenant(client)` — Validates tenant membership via `client.Tenants()`
+- [x] `Require(client, permission)` — Permission gate via `client.Authz()`
+- [x] `RequireAny(client, ...permissions)` — Any-of permission gate
+- [x] `APIKey(client)` — API Key authentication via `client.Secrets()`
+- [x] Works with both HTTP and gRPC transports
+- [x] Excluded operations configuration
+- [ ] Integration tests with Kratos server
+
+### P2.2 gRPC Interceptors
+**Priority:** High | **Effort:** 1-2 days | **Package:** `middleware/grpcmw/`
+
+- [x] `UnaryAuth(client)` — JWT verification for unary RPCs
+- [x] `StreamAuth(client)` — JWT verification for streaming
+- [x] `UnaryTenant(client)` — Tenant context injection
+- [x] `UnaryRequire(client, permission)` — Permission gate
+- [x] Excluded methods configuration
 - [ ] Integration tests
-
-### P2.2 Kratos Middleware
-**Priority:** High | **Effort:** 2 days | **Package:** `middleware/`
-
-- [ ] `KratosAuth(client)` — JWT verification middleware
-- [ ] `KratosTenant(client)` — Tenant context middleware
-- [ ] `KratosRequire(client, permission)` — Permission gate
-- [ ] Works with both HTTP and gRPC transports
-
-### P2.3 gRPC Interceptors
-**Priority:** High | **Effort:** 1-2 days | **Package:** `middleware/`
-
-- [ ] `UnaryAuthInterceptor(client)` — JWT verification for unary RPCs
-- [ ] `StreamAuthInterceptor(client)` — JWT verification for streaming
-- [ ] `UnaryTenantInterceptor(client)` — Tenant context injection
-- [ ] Metadata propagation (user_id, tenant_id, roles)
 
 ---
 
 ## Phase 3: Extended Features
 
-### P3.1 Tenant Client
-**Priority:** Medium | **Effort:** 1-2 days | **Package:** `tenant/`
+Note: These interfaces are already defined in the root package. Phase 3 is about providing
+reference implementations or backend-specific adapters.
 
-- [ ] `Resolve(ctx, slug)` → Tenant
-- [ ] `ResolveBySubdomain(ctx, subdomain)` → Tenant
-- [ ] `ValidateMembership(ctx, userID, tenantID)` → bool
-- [ ] `SwitchTenant(ctx, tenantID)` → (newTokenPair, error)
-- [ ] Local tenant cache
+### P3.1 Tenant Operations
+**Priority:** Medium | **Effort:** 1-2 days
 
-### P3.2 User Client
-**Priority:** Medium | **Effort:** 1 day | **Package:** `user/`
+- [ ] Reference `TenantService` implementation with local caching
+- [ ] `SwitchTenant(ctx, tenantID)` → (newTokenPair, error) helper
 
-- [ ] `GetCurrent(ctx)` → User
-- [ ] `Get(ctx, userID)` → User
-- [ ] `List(ctx, options)` → ([]User, total)
-- [ ] `GetRoles(ctx, userID)` → []Role
+### P3.2 User Operations
+**Priority:** Medium | **Effort:** 1 day
 
-### P3.3 Session Client
-**Priority:** Low | **Effort:** 1 day | **Package:** `session/`
+- [ ] Reference `UserService` implementation
 
-- [ ] `List(ctx)` → []Session
-- [ ] `Revoke(ctx, sessionID)` → error
-- [ ] `RevokeAllOthers(ctx)` → error
+### P3.3 Session Operations
+**Priority:** Low | **Effort:** 1 day
+
+- [ ] Reference `SessionService` implementation
 
 ---
 
 ## Phase 4: Testing & Quality
 
 ### P4.1 Fake Client
-**Priority:** High | **Effort:** 2 days | **Package:** `fake/`
+**Priority:** High | **Effort:** Done | **Package:** `fake/`
 
-- [ ] `fake.NewClient(options...)` — In-memory IAM client
-- [ ] `fake.WithUser(id, tenantID, roles)` — Configure test user
-- [ ] `fake.WithTenant(id, slug, status)` — Configure test tenant
-- [ ] `fake.WithPermissions(map)` — Configure permission rules
-- [ ] `fake.WithAPIKey(key, secret, userID)` — Configure test API key
-- [ ] Implements same interfaces as real client
-- [ ] Full unit tests
+- [x] `fake.NewClient(options...)` — Returns `*iam.Client` with in-memory implementations
+- [x] `fake.WithUser(id, tenantID, email, roles)` — Configure test user
+- [x] `fake.WithTenant(id, slug, status)` — Configure test tenant
+- [x] `fake.WithPermissions(userID, perms)` — Configure permission rules
+- [x] `fake.WithAPIKey(key, secret, userID)` — Configure test API key
+- [x] Implements all `iam.*` interfaces
+- [x] Full unit tests
 
 ### P4.2 Integration Tests
 **Priority:** Medium | **Effort:** 2 days
 
-- [ ] Docker Compose test environment (Valhalla IAM + PostgreSQL + Redis)
+- [ ] Docker Compose test environment (IAM server + PostgreSQL + Redis)
 - [ ] End-to-end test: login → get token → verify → check permission
 - [ ] End-to-end test: API key creation → service auth → permission check
 - [ ] Multi-tenant isolation test
@@ -187,7 +177,7 @@ Before the SDK can work, Valhalla IAM needs these server-side features:
 **Priority:** Medium | **Effort:** 2-3 days
 
 - [ ] Middleware emits audit events (auth success/failure, permission checks)
-- [ ] Configurable audit log destination (stdout, gRPC → Valhalla)
+- [ ] Configurable audit log destination (stdout, callback, etc.)
 - [ ] Structured log format (JSON)
 - [ ] Request ID propagation
 
@@ -197,7 +187,6 @@ Before the SDK can work, Valhalla IAM needs these server-side features:
 - [ ] Prometheus metrics: auth_requests_total, auth_failures_total
 - [ ] Permission check latency histogram
 - [ ] Cache hit/miss ratio
-- [ ] gRPC connection health
 
 ---
 
@@ -205,8 +194,8 @@ Before the SDK can work, Valhalla IAM needs these server-side features:
 
 | Phase | Duration | Dependencies |
 |-------|----------|-------------|
-| P0 (Valhalla prerequisites) | 1-2 weeks | None |
-| P1 (Core SDK) | 1 week | P0.1, P0.2, P0.3 |
+| P0 (Server prerequisites) | 1-2 weeks | None |
+| P1 (Core SDK) | 1 week | P0 |
 | P2 (Middleware) | 1 week | P1 |
 | P3 (Extended) | 3-5 days | P1 |
 | P4 (Testing) | 3-5 days | P1, P2 |
@@ -217,33 +206,33 @@ Before the SDK can work, Valhalla IAM needs these server-side features:
 
 ## Key Design Decisions
 
-### 1. RS256 over HS256
+### 1. Kratos + Proto-first
+- API contracts defined in `proto/iam/v1/iam.proto`
+- Kratos middleware is the primary integration (HTTP + gRPC)
+- Go interfaces align with proto service definitions
+- Generated gRPC stubs for backend communication
+
+### 2. Backend-Agnostic (Interface-Based)
+- SDK defines contracts (interfaces), not implementations
+- Any IAM server can be integrated by implementing the interfaces
+- Injected via Option pattern: `iam.WithAuthorizer(myImpl)`
+- Follows Go best practice: accept interfaces, return structs
+
+### 3. RS256 over HS256
 - Public key verification — services can't forge tokens
 - JWKS auto-distribution — no shared secrets
 - Industry standard for multi-service architectures
 
-### 2. gRPC for Service Communication
-- Type-safe via protobuf
-- Efficient binary protocol
-- Bidirectional streaming support
-- Native Go support
-
-### 3. Local Cache + gRPC Fallback
-- Permission decisions cached locally (5 min default)
+### 4. Local Cache + Remote Fallback
+- Permission decisions cached locally (configurable TTL, default 5 min)
 - Reduces latency to ~0ms for cached decisions
-- Falls back to gRPC when cache misses
-- Cache invalidation via TTL (future: Redis Pub/Sub)
+- Cache invalidation via TTL (future: event-driven)
 
-### 4. API Key for Service-to-Service
+### 5. API Key for Service-to-Service
 - Long-lived credentials (unlike JWT)
 - No login flow required
 - Per-service key isolation
 - Can be rotated without downtime
-
-### 5. Interface-Based Design
-- All client components implement interfaces
-- Enables fake implementations for testing
-- Follows Go best practices (accept interfaces, return structs)
 
 ---
 
@@ -251,7 +240,8 @@ Before the SDK can work, Valhalla IAM needs these server-side features:
 
 | Project | What to learn |
 |---------|--------------|
-| [marmotedu/iam](https://github.com/marmotedu/iam) | API key management, authz server separation, Go SDK design |
 | [kubernetes/client-go](https://github.com/kubernetes/client-go) | SDK API design patterns, interface-based architecture |
-| [ory/ladon](https://github.com/ory/ladon) | Policy-based authorization engine |
 | [lestrrat-go/jwx](https://github.com/lestrrat-go/jwx) | JWKS implementation reference |
+| [ory/ladon](https://github.com/ory/ladon) | Policy-based authorization engine |
+| [marmotedu/iam](https://github.com/marmotedu/iam) | API key management, Go SDK design |
+| [go-kratos/kratos](https://github.com/go-kratos/kratos) | Framework patterns, middleware design |

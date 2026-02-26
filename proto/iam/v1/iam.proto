@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+package iam.v1;
+
+option go_package = "github.com/chimerakang/iam-go/proto/iam/v1;iamv1";
+
+import "google/protobuf/timestamp.proto";
+
+// --- Authorization Service ---
+
+// AuthzService provides permission checking for authenticated users.
+service AuthzService {
+  // CheckPermission returns whether the user has a specific permission.
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+
+  // CheckResourcePermission returns whether the user can perform an action on a resource.
+  rpc CheckResourcePermission(CheckResourcePermissionRequest) returns (CheckPermissionResponse);
+
+  // GetPermissions returns all permissions granted to the user.
+  rpc GetPermissions(GetPermissionsRequest) returns (GetPermissionsResponse);
+}
+
+message CheckPermissionRequest {
+  string user_id = 1;
+  string permission = 2;
+}
+
+message CheckResourcePermissionRequest {
+  string user_id = 1;
+  string resource = 2;
+  string action = 3;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+}
+
+message GetPermissionsRequest {
+  string user_id = 1;
+}
+
+message GetPermissionsResponse {
+  repeated string permissions = 1;
+}
+
+// --- User Service ---
+
+// UserService provides user information retrieval.
+service UserService {
+  // GetUser returns a user by ID.
+  rpc GetUser(GetUserRequest) returns (User);
+
+  // ListUsers returns a paginated list of users.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // GetUserRoles returns the roles assigned to a user.
+  rpc GetUserRoles(GetUserRolesRequest) returns (GetUserRolesResponse);
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message ListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  int32 total = 2;
+}
+
+message GetUserRolesRequest {
+  string user_id = 1;
+}
+
+message GetUserRolesResponse {
+  repeated Role roles = 1;
+}
+
+// --- Tenant Service ---
+
+// TenantService provides tenant resolution and membership validation.
+service TenantService {
+  // ResolveTenant looks up a tenant by ID or slug.
+  rpc ResolveTenant(ResolveTenantRequest) returns (Tenant);
+
+  // ValidateMembership checks if a user belongs to a tenant.
+  rpc ValidateMembership(ValidateMembershipRequest) returns (ValidateMembershipResponse);
+}
+
+message ResolveTenantRequest {
+  string identifier = 1;
+}
+
+message ValidateMembershipRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+}
+
+message ValidateMembershipResponse {
+  bool is_member = 1;
+}
+
+// --- Session Service ---
+
+// SessionService provides session management for authenticated users.
+service SessionService {
+  // ListSessions returns all active sessions for a user.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // RevokeSession terminates a specific session.
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+
+  // RevokeAllOtherSessions terminates all sessions except the current one.
+  rpc RevokeAllOtherSessions(RevokeAllOtherSessionsRequest) returns (RevokeAllOtherSessionsResponse);
+}
+
+message ListSessionsRequest {
+  string user_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeSessionResponse {}
+
+message RevokeAllOtherSessionsRequest {
+  string user_id = 1;
+  string current_session_id = 2;
+}
+
+message RevokeAllOtherSessionsResponse {}
+
+// --- Secret Service ---
+
+// SecretService manages API key/secret pairs for service-to-service authentication.
+service SecretService {
+  // CreateSecret generates a new API key/secret pair.
+  rpc CreateSecret(CreateSecretRequest) returns (Secret);
+
+  // ListSecrets returns all API keys for a user (secrets not included).
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
+
+  // DeleteSecret revokes an API key.
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+
+  // VerifySecret validates an API key/secret pair.
+  rpc VerifySecret(VerifySecretRequest) returns (VerifySecretResponse);
+
+  // RotateSecret regenerates the secret for an existing API key.
+  rpc RotateSecret(RotateSecretRequest) returns (Secret);
+}
+
+message CreateSecretRequest {
+  string description = 1;
+}
+
+message ListSecretsRequest {
+  string user_id = 1;
+}
+
+message ListSecretsResponse {
+  repeated Secret secrets = 1;
+}
+
+message DeleteSecretRequest {
+  string secret_id = 1;
+}
+
+message DeleteSecretResponse {}
+
+message VerifySecretRequest {
+  string api_key = 1;
+  string api_secret = 2;
+}
+
+message VerifySecretResponse {
+  Claims claims = 1;
+}
+
+message RotateSecretRequest {
+  string secret_id = 1;
+}
+
+// --- Common Types ---
+
+// Claims contains the standard claims extracted from a verified token.
+message Claims {
+  string subject = 1;
+  string tenant_id = 2;
+  repeated string roles = 3;
+  string email = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  google.protobuf.Timestamp issued_at = 6;
+  string issuer = 7;
+  map<string, string> extra = 8;
+}
+
+// User represents an authenticated user.
+message User {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string tenant_id = 4;
+  repeated Role roles = 5;
+  map<string, string> metadata = 6;
+}
+
+// Role represents a named role assigned to a user.
+message Role {
+  string id = 1;
+  string name = 2;
+}
+
+// Tenant represents a tenant in a multi-tenant system.
+message Tenant {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string status = 4;
+}
+
+// Session represents an active user session.
+message Session {
+  string id = 1;
+  string user_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string user_agent = 5;
+  string ip = 6;
+}
+
+// Secret represents an API key/secret pair.
+message Secret {
+  string id = 1;
+  string api_key = 2;
+  string api_secret = 3;
+  string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}

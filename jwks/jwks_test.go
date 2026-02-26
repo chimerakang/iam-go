@@ -93,8 +93,8 @@ func TestVerify_ValidToken(t *testing.T) {
 	if len(claims.Roles) != 2 || claims.Roles[0] != "admin" || claims.Roles[1] != "editor" {
 		t.Errorf("Roles = %v, want [admin editor]", claims.Roles)
 	}
-	if claims.Extra["email"] != "test@example.com" {
-		t.Errorf("Extra[email] = %v, want test@example.com", claims.Extra["email"])
+	if claims.Email != "test@example.com" {
+		t.Errorf("Email = %q, want %q", claims.Email, "test@example.com")
 	}
 	if claims.ExpiresAt.IsZero() {
 		t.Error("ExpiresAt should not be zero")

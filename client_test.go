@@ -1,6 +1,7 @@
 package iam_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -82,4 +83,39 @@ func TestClose_NoErrorWithoutClosers(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Errorf("Close() error: %v", err)
 	}
+}
+
+func TestHealthCheck_NoServicesConfigured(t *testing.T) {
+	c, _ := iam.NewClient(iam.Config{Endpoint: "localhost:9000"})
+	err := c.HealthCheck(context.Background())
+	if err == nil {
+		t.Error("HealthCheck() expected error when no services are configured")
+	}
+}
+
+func TestHealthCheck_WithServices(t *testing.T) {
+	c, _ := iam.NewClient(
+		iam.Config{Endpoint: "localhost:9000"},
+		iam.WithUserService(&mockUserService{}),
+	)
+	err := c.HealthCheck(context.Background())
+	if err != nil {
+		t.Errorf("HealthCheck() unexpected error: %v", err)
+	}
+}
+
+// mockUserService is a simple mock for testing
+type mockUserService struct{}
+
+func (m *mockUserService) Get(ctx context.Context, userID string) (*iam.User, error) {
+	return nil, nil
+}
+func (m *mockUserService) GetCurrent(ctx context.Context) (*iam.User, error) {
+	return nil, nil
+}
+func (m *mockUserService) List(ctx context.Context, opts iam.ListOptions) ([]*iam.User, int, error) {
+	return nil, 0, nil
+}
+func (m *mockUserService) GetRoles(ctx context.Context, userID string) ([]iam.Role, error) {
+	return nil, nil
 }

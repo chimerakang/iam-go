@@ -7,6 +7,7 @@ type Claims struct {
 	Subject   string
 	TenantID  string
 	Roles     []string
+	Email     string
 	ExpiresAt time.Time
 	IssuedAt  time.Time
 	Issuer    string

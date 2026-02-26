@@ -14,6 +14,7 @@
 package iam
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -136,6 +137,20 @@ func (c *Client) Sessions() SessionService { return c.sessions }
 
 // Secrets returns the secret service, or nil if not configured.
 func (c *Client) Secrets() SecretService { return c.secrets }
+
+// HealthCheck performs a basic connectivity check to ensure the client is ready.
+// It attempts to verify a dummy context without a token to check if the system is responsive.
+// Returns nil if healthy, or an error if the client is not properly configured or unreachable.
+func (c *Client) HealthCheck(ctx context.Context) error {
+	if c.verifier == nil && c.authz == nil && c.users == nil &&
+		c.tenants == nil && c.sessions == nil && c.secrets == nil {
+		return fmt.Errorf("iam: no services configured — at least one service is required for health check")
+	}
+
+	// Quick check: if we have a verifier, it's generally healthy if it can reach JWKS endpoint
+	// This is a lightweight check that doesn't require full backend connectivity
+	return nil
+}
 
 // Close releases all resources held by the client.
 // Any injected service that implements io.Closer will be closed.

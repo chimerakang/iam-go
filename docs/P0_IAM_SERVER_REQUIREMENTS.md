@@ -129,7 +129,7 @@ SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c...
   "iss": "https://iam.example.com", // 發行者（必須）
   "exp": 1708769999,              // 過期時間（必須）
   "iat": 1708683599,              // 發行時間（必須）
-  "email": "user@example.com",    // 電子郵件（推薦）
+  "email": "user@example.com",    // 電子郵件（必須）
   "name": "John Doe"              // 用戶名稱（推薦）
 }
 ```
@@ -173,11 +173,12 @@ func PrivateKeyToJWK(privKey *rsa.PrivateKey, kid string) map[string]interface{}
 }
 
 // GenerateJWT 生成 RS256 簽名的 JWT
-func GenerateJWT(userID, tenantID string, roles []string, privKey *rsa.PrivateKey) (string, error) {
+func GenerateJWT(userID, tenantID, email string, roles []string, privKey *rsa.PrivateKey) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":       userID,
 		"tenant_id": tenantID,
 		"roles":     roles,
+		"email":     email,
 		"iss":       "https://iam.example.com",
 		"exp":       time.Now().Add(24 * time.Hour).Unix(),
 		"iat":       time.Now().Unix(),
@@ -519,6 +520,9 @@ service IAMService {
   // GetUserPermissions 取得用戶的所有權限
   rpc GetUserPermissions(GetUserPermissionsRequest) returns (GetUserPermissionsResponse);
 
+  // GetUser 按 ID 查詢用戶信息
+  rpc GetUser(GetUserRequest) returns (User);
+
   // ValidateTenantMembership 驗證用戶是否屬於租戶
   rpc ValidateTenantMembership(ValidateMembershipRequest) returns (ValidateMembershipResponse);
 
@@ -536,8 +540,9 @@ message IntrospectResponse {
   string subject = 2;
   string tenant_id = 3;
   repeated string roles = 4;
-  int64 issued_at = 5;
-  int64 expires_at = 6;
+  string email = 5;
+  int64 issued_at = 6;
+  int64 expires_at = 7;
 }
 
 // CheckPermission 相關
@@ -559,6 +564,19 @@ message GetUserPermissionsRequest {
 
 message GetUserPermissionsResponse {
   repeated string permissions = 1;
+}
+
+// GetUser 相關
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string tenant_id = 4;
+  repeated string roles = 5;
 }
 
 // ValidateTenantMembership 相關
@@ -608,6 +626,7 @@ X-API-Secret: sk_live_...
   "subject": "user-123",
   "tenant_id": "tenant-xyz",
   "roles": ["admin"],
+  "email": "user@example.com",
   "issued_at": 1708683599,
   "expires_at": 1708769999
 }
@@ -670,6 +689,25 @@ X-API-Secret: sk_live_...
 }
 ```
 
+#### GetUser
+
+```http
+GET /api/v1/users/user-123 HTTP/1.1
+X-API-Key: api_key_xyz789
+X-API-Secret: sk_live_...
+```
+
+**響應**
+```json
+{
+  "id": "user-123",
+  "email": "user@example.com",
+  "name": "John Doe",
+  "tenant_id": "tenant-xyz",
+  "roles": ["admin", "editor"]
+}
+```
+
 #### GetTenantBySlug
 
 ```http
@@ -719,6 +757,7 @@ func (s *IAMServiceServer) IntrospectToken(ctx context.Context, req *pb.Introspe
 		Subject:   claims.Subject,
 		TenantId:  claims.TenantID,
 		Roles:     claims.Roles,
+		Email:     claims.Email,
 		IssuedAt:  claims.IssuedAt.Unix(),
 		ExpiresAt: claims.ExpiresAt.Unix(),
 	}, nil
@@ -790,6 +829,40 @@ func (s *IAMServiceServer) ValidateTenantMembership(ctx context.Context, req *pb
 	}, nil
 }
 
+// GetUser 按 ID 查詢用戶
+func (s *IAMServiceServer) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.User, error) {
+	var user pb.User
+
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, email, name, tenant_id FROM users WHERE id = ?`,
+		req.UserId,
+	).Scan(&user.Id, &user.Email, &user.Name, &user.TenantId)
+
+	if err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	// 查詢用戶角色
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = ?`,
+		req.UserId,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		user.Roles = append(user.Roles, role)
+	}
+
+	return &user, nil
+}
+
 // GetTenantBySlug 按 slug 查詢租戶
 func (s *IAMServiceServer) GetTenantBySlug(ctx context.Context, req *pb.GetTenantBySlugRequest) (*pb.Tenant, error) {
 	var tenant pb.Tenant
@@ -818,7 +891,7 @@ func (s *IAMServiceServer) GetTenantBySlug(ctx context.Context, req *pb.GetTenan
 - [ ] RSA 金鑰對已生成並安全儲存
 - [ ] JWT 簽名演算法已更改為 RS256
 - [ ] `/.well-known/jwks.json` 端點已實現
-- [ ] JWT payload 包含所有必需欄位（sub, tenant_id, roles, iss, exp, iat）
+- [ ] JWT payload 包含所有必需欄位（sub, tenant_id, roles, email, iss, exp, iat）
 - [ ] JWKS 響應包含 `Cache-Control: public, max-age=3600` 頭
 - [ ] 支援多個活躍金鑰（`kid` 欄位）
 - [ ] 可以驗證：`curl https://iam-server/.well-known/jwks.json | jq .`
@@ -852,6 +925,7 @@ func (s *IAMServiceServer) GetTenantBySlug(ctx context.Context, req *pb.GetTenan
 - [ ] IntrospectToken 方法已實現
 - [ ] CheckPermission 方法已實現
 - [ ] GetUserPermissions 方法已實現
+- [ ] GetUser 方法已實現
 - [ ] ValidateTenantMembership 方法已實現
 - [ ] GetTenantBySlug 方法已實現
 - [ ] API Key 認證已實現（X-API-Key 和 X-API-Secret）

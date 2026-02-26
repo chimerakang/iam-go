@@ -145,6 +145,7 @@ func (f *fakeVerifier) Verify(_ context.Context, token string) (*iam.Claims, err
 		Subject:   user.ID,
 		TenantID:  user.TenantID,
 		Roles:     roleNames,
+		Email:     user.Email,
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 		IssuedAt:  time.Now(),
 		Issuer:    "fake",
@@ -394,19 +395,12 @@ func (f *fakeSecretService) Rotate(_ context.Context, secretID string) (*iam.Sec
 	return nil, fmt.Errorf("iam/fake: secret %q not found", secretID)
 }
 
-// --- context key for user ID ---
-
-type ctxKey string
-
-const userIDKey ctxKey = "iam_user_id"
-
 // ContextWithUserID returns a context with the user ID set.
 // Use this in tests to simulate an authenticated user.
 func ContextWithUserID(ctx context.Context, userID string) context.Context {
-	return context.WithValue(ctx, userIDKey, userID)
+	return iam.WithUserID(ctx, userID)
 }
 
 func userIDFromCtx(ctx context.Context) string {
-	v, _ := ctx.Value(userIDKey).(string)
-	return v
+	return iam.UserIDFromContext(ctx)
 }

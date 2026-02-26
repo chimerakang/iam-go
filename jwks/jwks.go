@@ -209,6 +209,9 @@ func mapToIAMClaims(m jwt.MapClaims) *iam.Claims {
 	if v, ok := m["tenant_id"].(string); ok {
 		c.TenantID = v
 	}
+	if v, ok := m["email"].(string); ok {
+		c.Email = v
+	}
 	if v, ok := m["iss"].(string); ok {
 		c.Issuer = v
 	}
@@ -228,8 +231,8 @@ func mapToIAMClaims(m jwt.MapClaims) *iam.Claims {
 
 	// Non-standard claims go to Extra
 	standard := map[string]bool{
-		"sub": true, "tenant_id": true, "iss": true,
-		"exp": true, "iat": true, "roles": true,
+		"sub": true, "tenant_id": true, "email": true,
+		"iss": true, "exp": true, "iat": true, "roles": true,
 		"aud": true, "nbf": true, "jti": true,
 	}
 	for k, v := range m {

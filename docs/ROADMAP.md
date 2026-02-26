@@ -2,14 +2,14 @@
 
 ## Project Goal
 
-Build a backend-agnostic Go SDK for Identity and Access Management, providing:
+Build a Kratos + Proto-first Go SDK for Identity and Access Management, providing:
 - Token verification (JWT via JWKS, standard RFC 7517)
 - Permission checking (with local caching)
 - API Key authentication (service-to-service)
 - Multi-tenancy context injection
-- Middleware for popular frameworks (Gin, Kratos, gRPC)
+- Middleware for Kratos (primary) and pure gRPC
 
-The SDK defines **interfaces** — concrete backends (gRPC, REST, etc.) are injected via the Option pattern.
+The SDK defines **interfaces** backed by **proto service definitions** — concrete backends (gRPC, REST, etc.) are injected via the Option pattern.
 
 ---
 
@@ -47,14 +47,14 @@ Before the SDK can be used, the IAM server needs these capabilities:
 ### P1.1 JWKS Client (TokenVerifier)
 **Priority:** Critical | **Effort:** 2 days | **Package:** `jwks/`
 
-- [ ] Fetch JWKS from configurable URL
-- [ ] Parse RSA public keys from JWK format
-- [ ] Cache keys in memory with configurable refresh interval
-- [ ] Auto-refresh on key rotation (kid mismatch)
-- [ ] Verify JWT signature using cached public key
-- [ ] Extract standard claims (sub, iss, exp, tenant_id, roles) → `iam.Claims`
-- [ ] Implement `iam.TokenVerifier` interface
-- [ ] Unit tests with fake JWKS server
+- [x] Fetch JWKS from configurable URL
+- [x] Parse RSA public keys from JWK format
+- [x] Cache keys in memory with configurable refresh interval
+- [x] Auto-refresh on key rotation (kid mismatch)
+- [x] Verify JWT signature using cached public key
+- [x] Extract standard claims (sub, iss, exp, tenant_id, roles) → `iam.Claims`
+- [x] Implement `iam.TokenVerifier` interface
+- [x] Unit tests with fake JWKS server
 
 ### P1.2 Client Core
 **Priority:** Critical | **Effort:** 1-2 days | **Package:** root
@@ -62,6 +62,7 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] `Config` struct with validation
 - [x] Option pattern for injecting service implementations
 - [x] Accessor methods: `Verifier()`, `Authz()`, `Users()`, `Tenants()`, `Sessions()`, `Secrets()`
+- [x] Context helpers: `WithUserID()`, `UserIDFromContext()`, etc.
 - [ ] Connection health check
 - [ ] Graceful shutdown (Close)
 - [ ] Context propagation (timeout, cancellation)
@@ -77,37 +78,41 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] `SecretService` interface
 - [x] Domain types: Claims, User, Role, Tenant, Session, Secret, ListOptions
 
+### P1.4 Proto Definitions
+**Priority:** Critical | **Effort:** Done | **Package:** `proto/iam/v1/`
+
+- [x] Define proto service contracts (AuthzService, UserService, TenantService, SessionService, SecretService)
+- [x] Define proto message types aligned with Go domain types
+- [x] `buf.yaml` and `buf.gen.yaml` configuration
+- [x] Makefile targets for proto generation
+- [ ] Generate Go stubs from proto
+- [ ] Conversion functions between proto and domain types
+
 ---
 
 ## Phase 2: Middleware
 
-### P2.1 Gin Middleware
-**Priority:** Critical | **Effort:** 2-3 days | **Package:** `middleware/`
+### P2.1 Kratos Middleware (Primary)
+**Priority:** Critical | **Effort:** 2-3 days | **Package:** `middleware/kratosmw/`
 
-- [ ] `GinAuth(client)` — JWT verification via `client.Verifier()`, injects user context
-- [ ] `GinTenant(client)` — Extracts tenant_id via `client.Tenants()`, validates membership
-- [ ] `GinRequire(client, permission)` — Permission gate via `client.Authz()`
-- [ ] `GinRequireAny(client, ...permissions)` — Any-of permission gate
-- [ ] `GinAPIKey(client)` — API Key authentication via `client.Secrets()`
-- [ ] Context helpers: `GetUserID(c)`, `GetTenantID(c)`, `GetRoles(c)`
-- [ ] Excluded paths configuration (public routes)
+- [x] `Auth(client)` — JWT verification via `client.Verifier()`, injects user context
+- [x] `Tenant(client)` — Validates tenant membership via `client.Tenants()`
+- [x] `Require(client, permission)` — Permission gate via `client.Authz()`
+- [x] `RequireAny(client, ...permissions)` — Any-of permission gate
+- [x] `APIKey(client)` — API Key authentication via `client.Secrets()`
+- [x] Works with both HTTP and gRPC transports
+- [x] Excluded operations configuration
+- [ ] Integration tests with Kratos server
+
+### P2.2 gRPC Interceptors
+**Priority:** High | **Effort:** 1-2 days | **Package:** `middleware/grpcmw/`
+
+- [x] `UnaryAuth(client)` — JWT verification for unary RPCs
+- [x] `StreamAuth(client)` — JWT verification for streaming
+- [x] `UnaryTenant(client)` — Tenant context injection
+- [x] `UnaryRequire(client, permission)` — Permission gate
+- [x] Excluded methods configuration
 - [ ] Integration tests
-
-### P2.2 Kratos Middleware
-**Priority:** High | **Effort:** 2 days | **Package:** `middleware/`
-
-- [ ] `KratosAuth(client)` — JWT verification middleware
-- [ ] `KratosTenant(client)` — Tenant context middleware
-- [ ] `KratosRequire(client, permission)` — Permission gate
-- [ ] Works with both HTTP and gRPC transports
-
-### P2.3 gRPC Interceptors
-**Priority:** High | **Effort:** 1-2 days | **Package:** `middleware/`
-
-- [ ] `UnaryAuthInterceptor(client)` — JWT verification for unary RPCs
-- [ ] `StreamAuthInterceptor(client)` — JWT verification for streaming
-- [ ] `UnaryTenantInterceptor(client)` — Tenant context injection
-- [ ] Metadata propagation (user_id, tenant_id, roles)
 
 ---
 
@@ -137,15 +142,15 @@ reference implementations or backend-specific adapters.
 ## Phase 4: Testing & Quality
 
 ### P4.1 Fake Client
-**Priority:** High | **Effort:** 2 days | **Package:** `fake/`
+**Priority:** High | **Effort:** Done | **Package:** `fake/`
 
-- [ ] `fake.NewClient(options...)` — Returns `*iam.Client` with in-memory implementations
-- [ ] `fake.WithUser(id, tenantID, roles)` — Configure test user
-- [ ] `fake.WithTenant(id, slug, status)` — Configure test tenant
-- [ ] `fake.WithPermissions(map)` — Configure permission rules
-- [ ] `fake.WithAPIKey(key, secret, userID)` — Configure test API key
-- [ ] Implements all `iam.*` interfaces
-- [ ] Full unit tests
+- [x] `fake.NewClient(options...)` — Returns `*iam.Client` with in-memory implementations
+- [x] `fake.WithUser(id, tenantID, email, roles)` — Configure test user
+- [x] `fake.WithTenant(id, slug, status)` — Configure test tenant
+- [x] `fake.WithPermissions(userID, perms)` — Configure permission rules
+- [x] `fake.WithAPIKey(key, secret, userID)` — Configure test API key
+- [x] Implements all `iam.*` interfaces
+- [x] Full unit tests
 
 ### P4.2 Integration Tests
 **Priority:** Medium | **Effort:** 2 days
@@ -201,23 +206,29 @@ reference implementations or backend-specific adapters.
 
 ## Key Design Decisions
 
-### 1. Backend-Agnostic (Interface-Based)
+### 1. Kratos + Proto-first
+- API contracts defined in `proto/iam/v1/iam.proto`
+- Kratos middleware is the primary integration (HTTP + gRPC)
+- Go interfaces align with proto service definitions
+- Generated gRPC stubs for backend communication
+
+### 2. Backend-Agnostic (Interface-Based)
 - SDK defines contracts (interfaces), not implementations
 - Any IAM server can be integrated by implementing the interfaces
 - Injected via Option pattern: `iam.WithAuthorizer(myImpl)`
 - Follows Go best practice: accept interfaces, return structs
 
-### 2. RS256 over HS256
+### 3. RS256 over HS256
 - Public key verification — services can't forge tokens
 - JWKS auto-distribution — no shared secrets
 - Industry standard for multi-service architectures
 
-### 3. Local Cache + Remote Fallback
+### 4. Local Cache + Remote Fallback
 - Permission decisions cached locally (configurable TTL, default 5 min)
 - Reduces latency to ~0ms for cached decisions
 - Cache invalidation via TTL (future: event-driven)
 
-### 4. API Key for Service-to-Service
+### 5. API Key for Service-to-Service
 - Long-lived credentials (unlike JWT)
 - No login flow required
 - Per-service key isolation
@@ -233,3 +244,4 @@ reference implementations or backend-specific adapters.
 | [lestrrat-go/jwx](https://github.com/lestrrat-go/jwx) | JWKS implementation reference |
 | [ory/ladon](https://github.com/ory/ladon) | Policy-based authorization engine |
 | [marmotedu/iam](https://github.com/marmotedu/iam) | API key management, Go SDK design |
+| [go-kratos/kratos](https://github.com/go-kratos/kratos) | Framework patterns, middleware design |

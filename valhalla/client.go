@@ -46,15 +46,13 @@ type Client struct {
 	userClient    iamv1.UserServiceClient
 	tenantClient  iamv1.TenantServiceClient
 	sessionClient iamv1.SessionServiceClient
-	secretClient  iamv1.SecretServiceClient
 
 	// iam-go 接口實現
-	verifier   iam.TokenVerifier
-	authz      iam.Authorizer
-	users      iam.UserService
-	tenants    iam.TenantService
-	sessions   iam.SessionService
-	secrets    iam.SecretService
+	verifier iam.TokenVerifier
+	authz    iam.Authorizer
+	users    iam.UserService
+	tenants  iam.TenantService
+	sessions iam.SessionService
 
 	// 當前用戶上下文（從 token 中提取）
 	currentUserID   string
@@ -79,7 +77,6 @@ func NewClient(target string, opts ...grpc.DialOption) (*Client, error) {
 		userClient:    iamv1.NewUserServiceClient(conn),
 		tenantClient:  iamv1.NewTenantServiceClient(conn),
 		sessionClient: iamv1.NewSessionServiceClient(conn),
-		secretClient:  iamv1.NewSecretServiceClient(conn),
 	}
 
 	// 初始化 iam-go 接口實現
@@ -87,16 +84,14 @@ func NewClient(target string, opts ...grpc.DialOption) (*Client, error) {
 	jwksURL := fmt.Sprintf("http://%s/.well-known/jwks.json", target)
 
 	client.verifier = &valhallaTokenVerifier{
-		secretClient:  client.secretClient,
-		jwksURL:       jwksURL,
-		httpClient:    httpClient,
-		jwksCacheTTL:  1 * time.Hour,
+		jwksURL:      jwksURL,
+		httpClient:   httpClient,
+		jwksCacheTTL: 1 * time.Hour,
 	}
 	client.authz = &valhallaAuthorizer{authzClient: client.authzClient, client: client}
 	client.users = &valhallaUserService{userClient: client.userClient, client: client}
 	client.tenants = &valhallaTenantService{tenantClient: client.tenantClient}
 	client.sessions = &valhallaSessionService{sessionClient: client.sessionClient, client: client}
-	client.secrets = &valhallaSecretService{secretClient: client.secretClient}
 
 	return client, nil
 }
@@ -131,11 +126,6 @@ func (c *Client) Sessions() iam.SessionService {
 	return c.sessions
 }
 
-// Secrets 返回 SecretService 實現
-func (c *Client) Secrets() iam.SecretService {
-	return c.secrets
-}
-
 // SetCurrentUser 設置當前用戶上下文（通常在驗證 token 後調用）
 func (c *Client) SetCurrentUser(userID, tenantID string) {
 	c.currentUserID = userID
@@ -145,7 +135,6 @@ func (c *Client) SetCurrentUser(userID, tenantID string) {
 // --- TokenVerifier Implementation ---
 
 type valhallaTokenVerifier struct {
-	secretClient  iamv1.SecretServiceClient
 	jwksURL       string
 	httpClient    *http.Client
 	jwksCache     map[string]interface{}
@@ -566,102 +555,6 @@ func (s *valhallaSessionService) RevokeAllOthers(ctx context.Context) error {
 		return fmt.Errorf("failed to revoke other sessions: %w", err)
 	}
 	return nil
-}
-
-// --- SecretService Implementation ---
-
-type valhallaSecretService struct {
-	secretClient iamv1.SecretServiceClient
-}
-
-func (s *valhallaSecretService) Create(ctx context.Context, description string) (*iam.Secret, error) {
-	resp, err := s.secretClient.CreateSecret(ctx, &iamv1.CreateSecretRequest{
-		Description: description,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create secret: %w", err)
-	}
-
-	return &iam.Secret{
-		ID:        resp.Id,
-		APIKey:    resp.ApiKey,
-		APISecret: resp.ApiSecret,
-		CreatedAt: resp.CreatedAt.AsTime(),
-		ExpiresAt: resp.ExpiresAt.AsTime(),
-	}, nil
-}
-
-func (s *valhallaSecretService) List(ctx context.Context) ([]iam.Secret, error) {
-	resp, err := s.secretClient.ListSecrets(ctx, &iamv1.ListSecretsRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list secrets: %w", err)
-	}
-
-	secrets := make([]iam.Secret, len(resp.Secrets))
-	for i, secret := range resp.Secrets {
-		secrets[i] = iam.Secret{
-			ID:        secret.Id,
-			APIKey:    secret.ApiKey,
-			APISecret: secret.ApiSecret,
-			CreatedAt: secret.CreatedAt.AsTime(),
-			ExpiresAt: secret.ExpiresAt.AsTime(),
-		}
-	}
-
-	return secrets, nil
-}
-
-func (s *valhallaSecretService) Delete(ctx context.Context, secretID string) error {
-	_, err := s.secretClient.DeleteSecret(ctx, &iamv1.DeleteSecretRequest{
-		SecretId: secretID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to delete secret: %w", err)
-	}
-	return nil
-}
-
-func (s *valhallaSecretService) Verify(ctx context.Context, apiKey, apiSecret string) (*iam.Claims, error) {
-	resp, err := s.secretClient.VerifySecret(ctx, &iamv1.VerifySecretRequest{
-		ApiKey:    apiKey,
-		ApiSecret: apiSecret,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to verify secret: %w", err)
-	}
-
-	extra := make(map[string]any)
-	for k, v := range resp.Claims.Extra {
-		extra[k] = v
-	}
-
-	return &iam.Claims{
-		Subject:   resp.Claims.Subject,
-		TenantID:  resp.Claims.TenantId,
-		Roles:     resp.Claims.Roles,
-		Email:     resp.Claims.Email,
-		ExpiresAt: resp.Claims.ExpiresAt.AsTime(),
-		IssuedAt:  resp.Claims.IssuedAt.AsTime(),
-		Issuer:    resp.Claims.Issuer,
-		Extra:     extra,
-	}, nil
-}
-
-func (s *valhallaSecretService) Rotate(ctx context.Context, secretID string) (*iam.Secret, error) {
-	resp, err := s.secretClient.RotateSecret(ctx, &iamv1.RotateSecretRequest{
-		SecretId: secretID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to rotate secret: %w", err)
-	}
-
-	return &iam.Secret{
-		ID:        resp.Id,
-		APIKey:    resp.ApiKey,
-		APISecret: resp.ApiSecret,
-		CreatedAt: resp.CreatedAt.AsTime(),
-		ExpiresAt: resp.ExpiresAt.AsTime(),
-	}, nil
 }
 
 // --- Helper Functions ---

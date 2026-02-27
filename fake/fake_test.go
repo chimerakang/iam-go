@@ -2,6 +2,7 @@ package fake_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/chimerakang/iam-go"
@@ -17,7 +18,7 @@ func setup() *iam.Client {
 		fake.WithTenant("t2", "globex", "active"),
 		fake.WithPermissions("u1", []string{"users:read", "users:write", "records:read"}),
 		fake.WithPermissions("u2", []string{"records:read"}),
-		fake.WithAPIKey("ak-1", "sk-1", "u1"),
+		fake.WithOAuth2App("app_test", "secret_test", []string{"iam:introspect", "iam:check-permission"}),
 	)
 }
 
@@ -229,89 +230,48 @@ func TestTenantService_ValidateMembership(t *testing.T) {
 	}
 }
 
-// --- SecretService ---
+// --- OAuth2TokenExchanger ---
 
-func TestSecretService_Verify(t *testing.T) {
+func TestOAuth2_ExchangeToken(t *testing.T) {
 	c := setup()
 
-	claims, err := c.Secrets().Verify(context.Background(), "ak-1", "sk-1")
+	token, err := c.OAuth2().ExchangeToken(context.Background(), []string{"iam:introspect"})
 	if err != nil {
-		t.Fatalf("Verify() error: %v", err)
+		t.Fatalf("ExchangeToken() error: %v", err)
 	}
-	if claims.Subject != "u1" {
-		t.Errorf("Subject = %q, want %q", claims.Subject, "u1")
+	if token.AccessToken == "" {
+		t.Error("ExchangeToken() should return an access token")
+	}
+	if token.TokenType != "Bearer" {
+		t.Errorf("TokenType = %q, want %q", token.TokenType, "Bearer")
+	}
+	if token.ExpiresIn != 3600 {
+		t.Errorf("ExpiresIn = %d, want 3600", token.ExpiresIn)
+	}
+	if !strings.Contains(token.AccessToken, "app_test") {
+		t.Errorf("AccessToken should contain client ID, got %q", token.AccessToken)
 	}
 }
 
-func TestSecretService_VerifyInvalid(t *testing.T) {
+func TestOAuth2_GetCachedToken(t *testing.T) {
 	c := setup()
 
-	_, err := c.Secrets().Verify(context.Background(), "ak-1", "wrong-secret")
-	if err == nil {
-		t.Fatal("Verify() expected error for wrong secret")
+	tokenStr, err := c.OAuth2().GetCachedToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetCachedToken() error: %v", err)
+	}
+	if tokenStr == "" {
+		t.Error("GetCachedToken() should return a non-empty token")
 	}
 }
 
-func TestSecretService_CreateAndList(t *testing.T) {
-	c := setup()
+func TestOAuth2_NotConfigured(t *testing.T) {
+	// Client without OAuth2App configured
+	c := fake.NewClient(
+		fake.WithUser("u1", "t1", "alice@example.com", []string{"admin"}),
+	)
 
-	secret, err := c.Secrets().Create(context.Background(), "test service")
-	if err != nil {
-		t.Fatalf("Create() error: %v", err)
-	}
-	if secret.APIKey == "" || secret.APISecret == "" {
-		t.Error("Create() should return both APIKey and APISecret")
-	}
-	if secret.Description != "test service" {
-		t.Errorf("Description = %q, want %q", secret.Description, "test service")
-	}
-
-	list, err := c.Secrets().List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error: %v", err)
-	}
-	// Should have original ak-1 + newly created
-	if len(list) != 2 {
-		t.Errorf("List() returned %d secrets, want 2", len(list))
-	}
-	// List should not expose APISecret
-	for _, s := range list {
-		if s.APISecret != "" {
-			t.Error("List() should not expose APISecret")
-		}
-	}
-}
-
-func TestSecretService_Delete(t *testing.T) {
-	c := setup()
-
-	secret, _ := c.Secrets().Create(context.Background(), "to-delete")
-	err := c.Secrets().Delete(context.Background(), secret.ID)
-	if err != nil {
-		t.Fatalf("Delete() error: %v", err)
-	}
-
-	// Verify it's gone
-	_, err = c.Secrets().Verify(context.Background(), secret.APIKey, secret.APISecret)
-	if err == nil {
-		t.Fatal("Verify() should fail after Delete()")
-	}
-}
-
-func TestSecretService_Rotate(t *testing.T) {
-	c := setup()
-
-	secret, _ := c.Secrets().Create(context.Background(), "rotate-me")
-	oldSecret := secret.APISecret
-
-	rotated, err := c.Secrets().Rotate(context.Background(), secret.ID)
-	if err != nil {
-		t.Fatalf("Rotate() error: %v", err)
-	}
-	if rotated.APISecret == oldSecret {
-		t.Error("Rotate() should return a new APISecret")
-	}
-	if rotated.APISecret == "" {
-		t.Error("Rotate() should return the new APISecret")
+	if c.OAuth2() != nil {
+		t.Error("OAuth2() should be nil when no OAuth2App is configured")
 	}
 }

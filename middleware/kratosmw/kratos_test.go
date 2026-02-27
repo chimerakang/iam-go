@@ -2,6 +2,7 @@ package kratosmw
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	iam "github.com/chimerakang/iam-go"
@@ -269,24 +270,25 @@ func TestRequireAny_NoPermissionMatches(t *testing.T) {
 	}
 }
 
-func TestAPIKey_Success(t *testing.T) {
+func mockClientContext(ctx context.Context, tr transport.Transporter) context.Context {
+	return transport.NewClientContext(ctx, tr)
+}
+
+func TestOAuth2ClientCredentials_Success(t *testing.T) {
 	client := fake.NewClient(
-		fake.WithAPIKey("key123", "secret456", "user123"),
+		fake.WithOAuth2App("app_test", "secret_test", []string{"iam:introspect"}),
 	)
 
-	mw := APIKey(client)
+	mw := OAuth2ClientCredentials(client)
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return "ok", nil
 	}
 
 	tr := &mockTransport{
-		headers: map[string]string{
-			"X-API-Key":    "key123",
-			"X-API-Secret": "secret456",
-		},
-		op: "/test/operation",
+		headers: make(map[string]string),
+		op:      "/test/operation",
 	}
-	ctx := mockServerContext(context.Background(), tr)
+	ctx := mockClientContext(context.Background(), tr)
 
 	wrapped := mw(middleware.Handler(handler))
 	result, err := wrapped(ctx, nil)
@@ -297,34 +299,35 @@ func TestAPIKey_Success(t *testing.T) {
 	if result != "ok" {
 		t.Fatalf("expected ok, got %v", result)
 	}
+
+	// Verify Authorization header was set
+	authHeader := tr.headers["Authorization"]
+	if authHeader == "" {
+		t.Fatal("expected Authorization header to be set")
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		t.Errorf("expected Bearer token, got %q", authHeader)
+	}
 }
 
-func TestAPIKey_InvalidSecret(t *testing.T) {
-	client := fake.NewClient(
-		fake.WithAPIKey("key123", "secret456", "user123"),
-	)
+func TestOAuth2ClientCredentials_NoExchanger(t *testing.T) {
+	client, _ := iam.NewClient(iam.Config{Endpoint: "localhost:9000"})
 
-	mw := APIKey(client)
+	mw := OAuth2ClientCredentials(client)
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return "ok", nil
 	}
 
 	tr := &mockTransport{
-		headers: map[string]string{
-			"X-API-Key":    "key123",
-			"X-API-Secret": "wrongsecret",
-		},
-		op: "/test/operation",
+		headers: make(map[string]string),
+		op:      "/test/operation",
 	}
-	ctx := mockServerContext(context.Background(), tr)
+	ctx := mockClientContext(context.Background(), tr)
 
 	wrapped := mw(middleware.Handler(handler))
 	_, err := wrapped(ctx, nil)
 
 	if err == nil {
-		t.Fatal("expected error for invalid secret")
-	}
-	if !errors.IsUnauthorized(err) {
-		t.Fatalf("expected Unauthorized error, got %v", err)
+		t.Fatal("expected error when oauth2 exchanger not configured")
 	}
 }

@@ -6,6 +6,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,15 +22,15 @@ type state struct {
 	tenants     map[string]*iam.Tenant     // tenantID → Tenant
 	tenantSlugs map[string]string          // slug → tenantID
 	permissions map[string]map[string]bool // userID → permission → allowed
-	secrets     map[string]*secretEntry    // apiKey → entry
 	sessions    map[string][]*iam.Session  // userID → sessions
+	oauth2App   *oauth2AppEntry            // OAuth2 application credentials
 	nextID      int
 }
 
-type secretEntry struct {
-	secret *iam.Secret
-	apiSecret string
-	userID    string
+type oauth2AppEntry struct {
+	clientID     string
+	clientSecret string
+	scopes       []string
 }
 
 // WithUser adds a fake user.
@@ -73,18 +74,13 @@ func WithPermissions(userID string, perms []string) Option {
 	}
 }
 
-// WithAPIKey adds a fake API key/secret pair linked to a user.
-func WithAPIKey(apiKey, apiSecret, userID string) Option {
+// WithOAuth2App configures a fake OAuth2 application for client credentials testing.
+func WithOAuth2App(clientID, clientSecret string, scopes []string) Option {
 	return func(s *state) {
-		s.secrets[apiKey] = &secretEntry{
-			secret: &iam.Secret{
-				ID:          apiKey,
-				APIKey:      apiKey,
-				Description: "fake",
-				CreatedAt:   time.Now(),
-			},
-			apiSecret: apiSecret,
-			userID:    userID,
+		s.oauth2App = &oauth2AppEntry{
+			clientID:     clientID,
+			clientSecret: clientSecret,
+			scopes:       scopes,
 		}
 	}
 }
@@ -96,7 +92,6 @@ func NewClient(opts ...Option) *iam.Client {
 		tenants:     make(map[string]*iam.Tenant),
 		tenantSlugs: make(map[string]string),
 		permissions: make(map[string]map[string]bool),
-		secrets:     make(map[string]*secretEntry),
 		sessions:    make(map[string][]*iam.Session),
 	}
 	for _, o := range opts {
@@ -108,16 +103,22 @@ func NewClient(opts ...Option) *iam.Client {
 	u := &fakeUserService{s: s}
 	t := &fakeTenantService{s: s}
 	ss := &fakeSessionService{s: s}
-	sec := &fakeSecretService{s: s}
 
-	c, _ := iam.NewClient(
-		iam.Config{Endpoint: "fake://localhost"},
+	clientOpts := []iam.Option{
 		iam.WithTokenVerifier(v),
 		iam.WithAuthorizer(a),
 		iam.WithUserService(u),
 		iam.WithTenantService(t),
 		iam.WithSessionService(ss),
-		iam.WithSecretService(sec),
+	}
+
+	if s.oauth2App != nil {
+		clientOpts = append(clientOpts, iam.WithOAuth2Exchanger(&fakeOAuth2Exchanger{s: s}))
+	}
+
+	c, _ := iam.NewClient(
+		iam.Config{Endpoint: "fake://localhost"},
+		clientOpts...,
 	)
 	return c
 }
@@ -314,85 +315,33 @@ func (f *fakeSessionService) RevokeAllOthers(ctx context.Context) error {
 	return nil
 }
 
-// --- SecretService ---
+// --- OAuth2TokenExchanger ---
 
-type fakeSecretService struct{ s *state }
+type fakeOAuth2Exchanger struct{ s *state }
 
-func (f *fakeSecretService) Create(_ context.Context, description string) (*iam.Secret, error) {
-	f.s.mu.Lock()
-	defer f.s.mu.Unlock()
-
-	f.s.nextID++
-	id := fmt.Sprintf("secret-%d", f.s.nextID)
-	secret := &iam.Secret{
-		ID:          id,
-		APIKey:      fmt.Sprintf("ak_%d", f.s.nextID),
-		APISecret:   fmt.Sprintf("sk_%d", f.s.nextID),
-		Description: description,
-		CreatedAt:   time.Now(),
-	}
-	f.s.secrets[secret.APIKey] = &secretEntry{
-		secret:    secret,
-		apiSecret: secret.APISecret,
-	}
-	return secret, nil
-}
-
-func (f *fakeSecretService) List(_ context.Context) ([]iam.Secret, error) {
+func (f *fakeOAuth2Exchanger) ExchangeToken(_ context.Context, scopes []string) (*iam.OAuth2Token, error) {
 	f.s.mu.RLock()
 	defer f.s.mu.RUnlock()
 
-	result := make([]iam.Secret, 0, len(f.s.secrets))
-	for _, e := range f.s.secrets {
-		s := *e.secret
-		s.APISecret = "" // Don't expose secrets on list
-		result = append(result, s)
+	if f.s.oauth2App == nil {
+		return nil, fmt.Errorf("iam/fake: no oauth2 app configured")
 	}
-	return result, nil
-}
 
-func (f *fakeSecretService) Delete(_ context.Context, secretID string) error {
-	f.s.mu.Lock()
-	defer f.s.mu.Unlock()
-
-	for key, e := range f.s.secrets {
-		if e.secret.ID == secretID {
-			delete(f.s.secrets, key)
-			return nil
-		}
-	}
-	return fmt.Errorf("iam/fake: secret %q not found", secretID)
-}
-
-func (f *fakeSecretService) Verify(_ context.Context, apiKey, apiSecret string) (*iam.Claims, error) {
-	f.s.mu.RLock()
-	defer f.s.mu.RUnlock()
-
-	entry, ok := f.s.secrets[apiKey]
-	if !ok || entry.apiSecret != apiSecret {
-		return nil, fmt.Errorf("iam/fake: invalid API key/secret")
-	}
-	return &iam.Claims{
-		Subject: entry.userID,
-		Issuer:  "fake",
+	return &iam.OAuth2Token{
+		AccessToken: "fake_access_token_" + f.s.oauth2App.clientID,
+		TokenType:   "Bearer",
+		ExpiresIn:   3600,
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Scope:       strings.Join(scopes, " "),
 	}, nil
 }
 
-func (f *fakeSecretService) Rotate(_ context.Context, secretID string) (*iam.Secret, error) {
-	f.s.mu.Lock()
-	defer f.s.mu.Unlock()
-
-	for _, e := range f.s.secrets {
-		if e.secret.ID == secretID {
-			f.s.nextID++
-			newSecret := fmt.Sprintf("sk_%d", f.s.nextID)
-			e.apiSecret = newSecret
-			result := *e.secret
-			result.APISecret = newSecret
-			return &result, nil
-		}
+func (f *fakeOAuth2Exchanger) GetCachedToken(ctx context.Context) (string, error) {
+	token, err := f.ExchangeToken(ctx, nil)
+	if err != nil {
+		return "", err
 	}
-	return nil, fmt.Errorf("iam/fake: secret %q not found", secretID)
+	return token.AccessToken, nil
 }
 
 // ContextWithUserID returns a context with the user ID set.

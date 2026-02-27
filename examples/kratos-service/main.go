@@ -4,7 +4,7 @@
 //   - JWT authentication via kratosmw.Auth
 //   - Tenant membership validation via kratosmw.Tenant
 //   - Permission gating via kratosmw.Require
-//   - API key authentication via kratosmw.APIKey
+//   - OAuth2 client credentials via kratosmw.OAuth2ClientCredentials
 //   - Context helpers for accessing authenticated user info
 package main
 
@@ -35,7 +35,7 @@ func main() {
 		fake.WithUser("user-123", "tenant-001", "user@example.com", []string{"admin"}),
 		fake.WithTenant("tenant-001", "acme", "active"),
 		fake.WithPermissions("user-123", []string{"users:read", "users:write", "admin:*"}),
-		fake.WithAPIKey("ak_test", "sk_test", "user-123"),
+		fake.WithOAuth2App("client-id", "client-secret", []string{"read", "write"}),
 	)
 	defer func() { _ = client.Close() }()
 

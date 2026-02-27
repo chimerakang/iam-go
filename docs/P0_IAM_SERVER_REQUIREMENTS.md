@@ -13,7 +13,7 @@
 
 1. [概述](#概述)
 2. [P0.1: RS256 JWT + JWKS Endpoint](#p01-rs256-jwt--jwks-endpoint)
-3. [P0.2: API Key/Secret Management Service](#p02-api-keysecret-management-service)
+3. [P0.2: OAuth2 Client Credentials Grant](#p02-oauth2-client-credentials-grant)
 4. [P0.3: IAM Service API for External Consumers](#p03-iam-service-api-for-external-consumers)
 5. [實現檢查清單](#實現檢查清單)
 
@@ -26,7 +26,7 @@
 iam-go SDK 是後端無關的，設計用於與任何 IAM server 整合。P0 定義了這種整合的**最小要求**，確保：
 
 - ✅ 服務可以**本地驗證 JWT**（無需每次都呼叫 IAM server）
-- ✅ 服務可以**驗證 API Key**（用於服務間認證）
+- ✅ 服務可以**透過 OAuth2 Client Credentials** 取得 M2M access token
 - ✅ 外部系統可以**查詢權限和租戶信息**（無需存儲副本）
 
 ### 使用場景
@@ -36,7 +36,7 @@ iam-go SDK 是後端無關的，設計用於與任何 IAM server 整合。P0 定
 │          IAM Server (P0 實現)                 │
 │  ┌─────────────────────────────────────┐   │
 │  │ P0.1: JWT + JWKS                    │   │
-│  │ P0.2: API Key Management            │   │
+│  │ P0.2: OAuth2 Client Credentials     │   │
 │  │ P0.3: External Service API          │   │
 │  └─────────────────────────────────────┘   │
 └─────────────────────────────────────────────┘
@@ -46,7 +46,7 @@ iam-go SDK 是後端無關的，設計用於與任何 IAM server 整合。P0 定
 │  ┌─────────────────────────────────────┐   │
 │  │ P1.1: 本地驗證 JWT (via JWKS)       │   │
 │  │ P1.3: 檢查權限 (cached)             │   │
-│  │ P1.4: 驗證 API Key                  │   │
+│  │ P1.4: OAuth2 Token Exchange          │   │
 │  └─────────────────────────────────────┘   │
 └─────────────────────────────────────────────┘
 ```
@@ -223,158 +223,84 @@ claims, err := verifier.Verify(ctx, tokenString)
 
 ---
 
-## P0.2: API Key/Secret Management Service
+## P0.2: OAuth2 Client Credentials Grant
 
 ### 概述
 
-IAM server 必須提供 API Key/Secret CRUD 服務，供服務間認證。API Key 用於無需登入的機器對機器（M2M）認證。
+IAM server 必須提供 OAuth2 Client Credentials Grant（RFC 6749 Section 4.4），供服務間（M2M）認證。應用程式使用 client_id 和 client_secret 交換 access token。
 
 ### 技術規格
 
 | 項目 | 要求 |
 |------|------|
-| **驗證方式** | HTTP Header: `X-API-Key` 和 `X-API-Secret` |
-| **儲存方式** | API Secret 以 bcrypt 雜湊儲存，不存明文 |
-| **顯示策略** | Secret 僅在建立時返回一次，之後不可檢視 |
-| **輪換** | 支援 Rotate 操作，產生新 Secret |
-| **過期** | 可設置過期時間 |
+| **授權類型** | `client_credentials`（RFC 6749 Section 4.4） |
+| **Token 端點** | `POST /oauth2/token` |
+| **認證方式** | HTTP Basic 或 POST body（client_id + client_secret） |
+| **Token 格式** | Bearer access token（JWT 或 opaque） |
+| **Scope** | 支援可配置的 scope 列表 |
+| **TTL** | 可配置的 token 過期時間（建議 3600 秒） |
 
-### 2.1 API Key 資料結構
+### 2.1 OAuth2 Client 資料結構
 
 #### 資料庫 Schema
 
 ```sql
-CREATE TABLE api_secrets (
+CREATE TABLE oauth2_clients (
   id UUID PRIMARY KEY,
-  user_id UUID NOT NULL,
-  tenant_id UUID NOT NULL,
-  secret_id VARCHAR(32) UNIQUE NOT NULL,    -- 公開的 API Key
-  secret_key_hash VARCHAR(255) NOT NULL,    -- bcrypt 雜湊
-  description TEXT,
-  status VARCHAR(20) DEFAULT 'active',      -- active, revoked
-  expires_at TIMESTAMP,
+  client_id VARCHAR(64) UNIQUE NOT NULL,
+  client_secret_hash VARCHAR(255) NOT NULL,   -- bcrypt 雜湊
+  name TEXT,
+  allowed_scopes TEXT[],                       -- 允許的 scope 列表
+  status VARCHAR(20) DEFAULT 'active',         -- active, revoked
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-  FOREIGN KEY (user_id) REFERENCES users(id),
-  FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-  INDEX (user_id, tenant_id),
-  INDEX (secret_id)
+  INDEX (client_id)
 );
 ```
 
-#### API Key 物件
+#### OAuth2 Client 物件
 
 ```json
 {
-  "id": "sec-abc123def456",
-  "secret_id": "api_key_xyz789",           // 公開的 API Key
-  "secret_key": "sk_live_abcd1234...",     // 僅在建立時返回
-  "description": "Production API Key",
-  "user_id": "user-123",
-  "tenant_id": "tenant-xyz",
+  "client_id": "svc-order-service",
+  "client_secret": "cs_live_abcd1234...",     // 僅在建立時返回
+  "name": "Order Service",
+  "allowed_scopes": ["read", "write", "admin"],
   "status": "active",
-  "created_at": "2024-01-15T10:30:00Z",
-  "expires_at": null,
-  "last_used_at": "2024-01-20T14:22:00Z"
-}
-```
-
-### 2.2 API 端點規格
-
-#### CreateSecret - 建立 API Key
-
-```http
-POST /api/v1/secrets HTTP/1.1
-Content-Type: application/json
-Authorization: Bearer {jwt_token}
-
-{
-  "description": "Production API Key"
-}
-```
-
-**響應 (201 Created)**
-```json
-{
-  "id": "sec-abc123",
-  "secret_id": "api_key_xyz789",
-  "secret_key": "sk_live_abcd1234xyz789",    // 僅此時顯示
-  "description": "Production API Key",
   "created_at": "2024-01-15T10:30:00Z"
 }
 ```
 
-#### ListSecrets - 列出 API Keys
+### 2.2 Token 端點規格
+
+#### Token Exchange - 交換 Access Token
 
 ```http
-GET /api/v1/secrets?user_id=user-123&tenant_id=tenant-xyz HTTP/1.1
-Authorization: Bearer {jwt_token}
+POST /oauth2/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&
+client_id=svc-order-service&
+client_secret=cs_live_abcd1234...&
+scope=read write
 ```
 
 **響應 (200 OK)**
 ```json
 {
-  "secrets": [
-    {
-      "id": "sec-abc123",
-      "secret_id": "api_key_xyz789",
-      "description": "Production API Key",
-      "status": "active",
-      "created_at": "2024-01-15T10:30:00Z",
-      "expires_at": null,
-      "last_used_at": "2024-01-20T14:22:00Z"
-    }
-  ],
-  "total": 1
+  "access_token": "eyJhbGciOiJSUzI1NiI...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "read write"
 }
 ```
 
-#### VerifySecret - 驗證 API Key
-
-```http
-POST /api/v1/secrets/verify HTTP/1.1
-Content-Type: application/json
-
-{
-  "api_key": "api_key_xyz789",
-  "api_secret": "sk_live_abcd1234xyz789"
-}
-```
-
-**響應 (200 OK)**
+**錯誤響應 (401 Unauthorized)**
 ```json
 {
-  "valid": true,
-  "user_id": "user-123",
-  "tenant_id": "tenant-xyz",
-  "expires_at": null
-}
-```
-
-#### DeleteSecret - 撤銷 API Key
-
-```http
-DELETE /api/v1/secrets/{secret_id} HTTP/1.1
-Authorization: Bearer {jwt_token}
-```
-
-**響應 (204 No Content)**
-
-#### RotateSecret - 輪換 API Key
-
-```http
-POST /api/v1/secrets/{secret_id}/rotate HTTP/1.1
-Authorization: Bearer {jwt_token}
-```
-
-**響應 (201 Created)**
-```json
-{
-  "id": "sec-abc456",
-  "secret_id": "api_key_xyz789",
-  "secret_key": "sk_live_new_secret_key",   // 新的 Secret
-  "created_at": "2024-01-25T10:30:00Z"
+  "error": "invalid_client",
+  "error_description": "Client authentication failed"
 }
 ```
 
@@ -388,101 +314,61 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"time"
+
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Secret 表示一個 API Key/Secret 對
-type Secret struct {
-	ID          string    `db:"id"`
-	UserID      string    `db:"user_id"`
-	TenantID    string    `db:"tenant_id"`
-	SecretID    string    `db:"secret_id"`      // 公開的 API Key
-	SecretHash  string    `db:"secret_key_hash"`// bcrypt 雜湊
-	Description string    `db:"description"`
-	Status      string    `db:"status"`
-	CreatedAt   time.Time `db:"created_at"`
-	ExpiresAt   *time.Time `db:"expires_at"`
+// OAuth2Client 表示一個 OAuth2 client 應用程式
+type OAuth2Client struct {
+	ID               string    `db:"id"`
+	ClientID         string    `db:"client_id"`
+	ClientSecretHash string    `db:"client_secret_hash"`
+	Name             string    `db:"name"`
+	AllowedScopes    []string  `db:"allowed_scopes"`
+	Status           string    `db:"status"`
+	CreatedAt        time.Time `db:"created_at"`
 }
 
-// GenerateSecret 生成新的 API Key/Secret 對
-func GenerateSecret() (apiKey, apiSecret string, err error) {
-	// 生成 32 字節的隨機數據
-	randomBytes := make([]byte, 32)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return "", "", err
+// TokenResponse 表示 OAuth2 token 響應
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int32  `json:"expires_in"`
+	Scope       string `json:"scope"`
+}
+
+// HandleTokenRequest 處理 /oauth2/token 請求
+func HandleTokenRequest(w http.ResponseWriter, r *http.Request) {
+	grantType := r.FormValue("grant_type")
+	if grantType != "client_credentials" {
+		http.Error(w, `{"error":"unsupported_grant_type"}`, 400)
+		return
 	}
 
-	// API Key (公開的，用於識別)
-	apiKey = "api_key_" + base64.URLEncoding.EncodeToString(randomBytes[:16])
+	clientID := r.FormValue("client_id")
+	clientSecret := r.FormValue("client_secret")
 
-	// API Secret (私密的，用於驗證)
-	apiSecret = "sk_live_" + base64.URLEncoding.EncodeToString(randomBytes)
-
-	return apiKey, apiSecret, nil
-}
-
-// HashSecret 對 Secret 進行 bcrypt 雜湊
-func HashSecret(secret string) (string, error) {
-	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	return string(hashedBytes), err
-}
-
-// VerifySecret 驗證 API Key/Secret 對
-func VerifySecret(ctx context.Context, apiKey, apiSecret string, db *sql.DB) (userID, tenantID string, err error) {
-	var secret Secret
-
-	// 查詢 API Key
-	err = db.QueryRowContext(ctx,
-		`SELECT user_id, tenant_id, secret_key_hash, status, expires_at
-		 FROM api_secrets WHERE secret_id = ? AND status = 'active'`,
-		apiKey,
-	).Scan(&secret.UserID, &secret.TenantID, &secret.SecretHash, &secret.Status, &secret.ExpiresAt)
-
+	// 驗證 client credentials
+	client, err := validateClient(r.Context(), clientID, clientSecret)
 	if err != nil {
-		return "", "", fmt.Errorf("api key not found")
+		http.Error(w, `{"error":"invalid_client"}`, 401)
+		return
 	}
 
-	// 檢查過期時間
-	if secret.ExpiresAt != nil && secret.ExpiresAt.Before(time.Now()) {
-		return "", "", fmt.Errorf("api key expired")
-	}
+	// 驗證 scope
+	requestedScopes := strings.Split(r.FormValue("scope"), " ")
+	validScopes := validateScopes(requestedScopes, client.AllowedScopes)
 
-	// 驗證 Secret
-	if err := bcrypt.CompareHashAndPassword([]byte(secret.SecretHash), []byte(apiSecret)); err != nil {
-		return "", "", fmt.Errorf("invalid api secret")
-	}
+	// 產生 access token
+	token, expiresIn := generateAccessToken(client, validScopes)
 
-	return secret.UserID, secret.TenantID, nil
-}
-
-// CreateSecret 建立新的 API Key
-func CreateSecret(ctx context.Context, userID, tenantID, description string, db *sql.DB) (*Secret, string, error) {
-	apiKey, apiSecret, _ := GenerateSecret()
-	secretHash, _ := HashSecret(apiSecret)
-
-	secret := &Secret{
-		ID:          uuid.New().String(),
-		UserID:      userID,
-		TenantID:    tenantID,
-		SecretID:    apiKey,
-		SecretHash:  secretHash,
-		Description: description,
-		Status:      "active",
-		CreatedAt:   time.Now(),
-	}
-
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO api_secrets (id, user_id, tenant_id, secret_id, secret_key_hash, description, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		secret.ID, secret.UserID, secret.TenantID, secret.SecretID, secret.SecretHash,
-		secret.Description, secret.Status, secret.CreatedAt,
-	)
-
-	if err != nil {
-		return nil, "", err
-	}
-
-	return secret, apiSecret, nil // 返回新的 Secret（僅此時）
+	json.NewEncoder(w).Encode(TokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   expiresIn,
+		Scope:       strings.Join(validScopes, " "),
+	})
 }
 ```
 
@@ -492,16 +378,16 @@ func CreateSecret(ctx context.Context, userID, tenantID, description string, db 
 
 ### 概述
 
-IAM server 必須提供一個 gRPC（或 REST）服務，供外部系統查詢權限、驗證 token、驗證租戶成員身份。該服務透過 API Key 認證（而非 JWT）。
+IAM server 必須提供一個 gRPC（或 REST）服務，供外部系統查詢權限、驗證 token、驗證租戶成員身份。該服務透過 OAuth2 Bearer token 認證。
 
 ### 技術規格
 
 | 項目 | 要求 |
 |------|------|
 | **協議** | gRPC (Protocol Buffers) 或 REST |
-| **認證** | API Key (X-API-Key + X-API-Secret) |
+| **認證** | OAuth2 Bearer Token（`Authorization: Bearer {token}`） |
 | **快取** | 支援響應快取（TTL 可配置） |
-| **限流** | 按 API Key 實施速率限制 |
+| **限流** | 按 client ID 實施速率限制 |
 
 ### 3.1 Proto 服務定義
 
@@ -611,8 +497,7 @@ message Tenant {
 
 ```http
 POST /api/v1/introspect HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 
 {
   "token": "eyJhbGciOiJSUzI1NiI..."
@@ -636,8 +521,7 @@ X-API-Secret: sk_live_...
 
 ```http
 POST /api/v1/check-permission HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 
 {
   "user_id": "user-123",
@@ -657,8 +541,7 @@ X-API-Secret: sk_live_...
 
 ```http
 GET /api/v1/users/user-123/permissions?tenant_id=tenant-xyz HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 ```
 
 **響應**
@@ -672,8 +555,7 @@ X-API-Secret: sk_live_...
 
 ```http
 POST /api/v1/validate-membership HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 
 {
   "user_id": "user-123",
@@ -693,8 +575,7 @@ X-API-Secret: sk_live_...
 
 ```http
 GET /api/v1/users/user-123 HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 ```
 
 **響應**
@@ -712,8 +593,7 @@ X-API-Secret: sk_live_...
 
 ```http
 GET /api/v1/tenants/my-company HTTP/1.1
-X-API-Key: api_key_xyz789
-X-API-Secret: sk_live_...
+Authorization: Bearer {access_token}
 ```
 
 **響應**
@@ -897,26 +777,20 @@ func (s *IAMServiceServer) GetTenantBySlug(ctx context.Context, req *pb.GetTenan
 - [ ] 可以驗證：`curl https://iam-server/.well-known/jwks.json | jq .`
 - [ ] 可以驗證：用公鑰驗證 RS256 簽名的 token 成功
 
-### P0.2 - API Key/Secret 管理
+### P0.2 - OAuth2 Client Credentials
 
-- [ ] `api_secrets` 資料表已建立
-- [ ] CreateSecret 端點已實現，返回 secret 一次
-- [ ] ListSecrets 端點已實現（不返回 secret）
-- [ ] VerifySecret 端點已實現
-- [ ] DeleteSecret 端點已實現
-- [ ] RotateSecret 端點已實現
-- [ ] Secret 以 bcrypt 儲存，不存明文
-- [ ] API Key 格式：`api_key_xxxxx`，Secret 格式：`sk_live_xxxxx`
+- [ ] `oauth2_clients` 資料表已建立
+- [ ] `POST /oauth2/token` 端點已實現
+- [ ] 支援 `grant_type=client_credentials`
+- [ ] Client secret 以 bcrypt 儲存，不存明文
+- [ ] 支援 scope 驗證
+- [ ] Token 過期時間可配置
 - [ ] 可以驗證：
   ```bash
-  # 建立
-  curl -X POST https://iam-server/api/v1/secrets \
-    -H "Authorization: Bearer $TOKEN" \
-    -d '{"description":"test"}' | jq .
-
-  # 驗證
-  curl -X POST https://iam-server/api/v1/secrets/verify \
-    -d '{"api_key":"api_key_xxx","api_secret":"sk_live_xxx"}' | jq .
+  # 交換 token
+  curl -X POST https://iam-server/oauth2/token \
+    -d 'grant_type=client_credentials&client_id=svc-test&client_secret=cs_live_xxx&scope=read write' \
+    | jq .
   ```
 
 ### P0.3 - IAM Service API
@@ -928,28 +802,26 @@ func (s *IAMServiceServer) GetTenantBySlug(ctx context.Context, req *pb.GetTenan
 - [ ] GetUser 方法已實現
 - [ ] ValidateTenantMembership 方法已實現
 - [ ] GetTenantBySlug 方法已實現
-- [ ] API Key 認證已實現（X-API-Key 和 X-API-Secret）
-- [ ] 速率限制已實現
+- [ ] OAuth2 Bearer token 認證已實現
+- [ ] 速率限制已實現（按 client ID）
 - [ ] 可以驗證：
   ```bash
   # gRPC
   grpcurl -plaintext \
-    -H "x-api-key: api_key_xxx" \
-    -H "x-api-secret: sk_live_xxx" \
+    -H "authorization: Bearer $ACCESS_TOKEN" \
     -d '{"token":"..."}' \
     iam-server:50051 iam.v1.IAMService/IntrospectToken
 
   # REST
   curl -X POST https://iam-server/api/v1/introspect \
-    -H "X-API-Key: api_key_xxx" \
-    -H "X-API-Secret: sk_live_xxx" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d '{"token":"..."}' | jq .
   ```
 
 ### 整合測試
 
 - [ ] iam-go SDK 能成功驗證 P0.1 的 JWT
-- [ ] iam-go SDK 能成功驗證 P0.2 的 API Key
+- [ ] iam-go SDK 能成功透過 P0.2 的 OAuth2 端點交換 token
 - [ ] iam-go SDK 能成功查詢 P0.3 的權限信息
 - [ ] 所有端點都支援 HTTPS
 - [ ] 所有端點都有適當的錯誤處理和日誌記錄

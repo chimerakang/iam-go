@@ -24,14 +24,14 @@ import (
 // Client is the main entry point for IAM operations.
 // Service implementations are injected via Option functions.
 type Client struct {
-	config   Config
-	logger   *slog.Logger
-	verifier TokenVerifier
-	authz    Authorizer
-	users    UserService
-	tenants  TenantService
-	sessions SessionService
-	secrets  SecretService
+	config    Config
+	logger    *slog.Logger
+	verifier  TokenVerifier
+	authz     Authorizer
+	users     UserService
+	tenants   TenantService
+	sessions  SessionService
+	oauth2    OAuth2TokenExchanger
 }
 
 // Config holds connection and behavior configuration.
@@ -43,11 +43,20 @@ type Config struct {
 	// Example: "https://auth.example.com/.well-known/jwks.json"
 	JWKSUrl string
 
-	// APIKey is the public identifier for service-to-service authentication.
-	APIKey string
+	// OAuth2ClientID is the client ID for OAuth2 Client Credentials (M2M authentication).
+	OAuth2ClientID string
 
-	// APISecret is the private key for service-to-service authentication.
-	APISecret string
+	// OAuth2ClientSecret is the client secret for OAuth2 Client Credentials.
+	OAuth2ClientSecret string
+
+	// OAuth2TokenURL is the token endpoint URL. If empty, defaults to Endpoint + "/api/v1/oauth/token".
+	OAuth2TokenURL string
+
+	// OAuth2Scopes specifies the scopes to request. Default: ["iam:introspect", "iam:check-permission"].
+	OAuth2Scopes []string
+
+	// TokenRefreshBuffer is how long before expiry to refresh the token. Default: 5 minutes.
+	TokenRefreshBuffer time.Duration
 
 	// CacheTTL controls how long permission decisions are cached locally.
 	// Default: 5 minutes.
@@ -93,9 +102,9 @@ func WithSessionService(s SessionService) Option {
 	return func(c *Client) { c.sessions = s }
 }
 
-// WithSecretService sets the API key management implementation.
-func WithSecretService(s SecretService) Option {
-	return func(c *Client) { c.secrets = s }
+// WithOAuth2Exchanger sets the OAuth2 token exchanger implementation.
+func WithOAuth2Exchanger(e OAuth2TokenExchanger) Option {
+	return func(c *Client) { c.oauth2 = e }
 }
 
 // DefaultCacheTTL is the default duration for caching permission decisions.
@@ -135,15 +144,15 @@ func (c *Client) Tenants() TenantService { return c.tenants }
 // Sessions returns the session service, or nil if not configured.
 func (c *Client) Sessions() SessionService { return c.sessions }
 
-// Secrets returns the secret service, or nil if not configured.
-func (c *Client) Secrets() SecretService { return c.secrets }
+// OAuth2 returns the OAuth2 token exchanger, or nil if not configured.
+func (c *Client) OAuth2() OAuth2TokenExchanger { return c.oauth2 }
 
 // HealthCheck performs a basic connectivity check to ensure the client is ready.
 // It attempts to verify a dummy context without a token to check if the system is responsive.
 // Returns nil if healthy, or an error if the client is not properly configured or unreachable.
 func (c *Client) HealthCheck(ctx context.Context) error {
 	if c.verifier == nil && c.authz == nil && c.users == nil &&
-		c.tenants == nil && c.sessions == nil && c.secrets == nil {
+		c.tenants == nil && c.sessions == nil && c.oauth2 == nil {
 		return fmt.Errorf("iam: no services configured — at least one service is required for health check")
 	}
 
@@ -157,7 +166,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 func (c *Client) Close() error {
 	closers := []interface{}{
 		c.verifier, c.authz, c.users,
-		c.tenants, c.sessions, c.secrets,
+		c.tenants, c.sessions, c.oauth2,
 	}
 	var firstErr error
 	for _, svc := range closers {

@@ -66,14 +66,15 @@ if !allowed {
 permissions, err := client.Authz().GetPermissions(ctx)
 ```
 
-### 4. 驗證 API Key
+### 4. OAuth2 服務間認證
 
 ```go
-// 驗證服務間認證
-ok, err := client.Secrets().Verify(ctx, apiKey, apiSecret)
-if !ok {
-    log.Println("Invalid API credentials")
+// 使用 OAuth2 Client Credentials 取得 M2M token
+token, err := client.OAuth2().GetCachedToken(ctx)
+if err != nil {
+    log.Println("Failed to get OAuth2 token:", err)
 }
+// token 是已快取的 Bearer access token，可直接附加到請求標頭
 ```
 
 ## 🔌 與 Kratos 整合
@@ -234,23 +235,17 @@ tenant, err := client.Tenants().Resolve(ctx, "tenant-001")
 ok, err := client.Tenants().ValidateMembership(ctx, userID, tenantID)
 ```
 
-### SecretService
+### OAuth2TokenExchanger
 
 ```go
-// 驗證 API Key/Secret
-ok, err := client.Secrets().Verify(ctx, apiKey, apiSecret)
+// 使用 Client Credentials 交換 access token
+token, err := client.OAuth2().ExchangeToken(ctx, []string{"read", "write"})
+// token.AccessToken — Bearer token
+// token.ExpiresAt — 過期時間
 
-// 列出 Secret
-secrets, total, err := client.Secrets().List(ctx, &iam.ListOptions{})
-
-// 建立新 Secret
-secret, err := client.Secrets().Create(ctx, userID, tenantID, "desc")
-
-// 輪換 Secret
-newSecret, err := client.Secrets().Rotate(ctx, secretID)
-
-// 刪除 Secret
-err := client.Secrets().Delete(ctx, secretID)
+// 取得快取的 token（自動刷新）
+accessToken, err := client.OAuth2().GetCachedToken(ctx)
+// accessToken 為 string，可直接使用
 ```
 
 ### SessionService

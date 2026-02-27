@@ -150,65 +150,6 @@ message RevokeAllOtherSessionsRequest {
 
 message RevokeAllOtherSessionsResponse {}
 
-// --- Secret Service ---
-
-// SecretService manages API key/secret pairs for service-to-service authentication.
-service SecretService {
-  // CreateSecret generates a new API key/secret pair.
-  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
-
-  // ListSecrets returns all API keys for a user (secrets not included).
-  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
-
-  // DeleteSecret revokes an API key.
-  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
-
-  // VerifySecret validates an API key/secret pair.
-  rpc VerifySecret(VerifySecretRequest) returns (VerifySecretResponse);
-
-  // RotateSecret regenerates the secret for an existing API key.
-  rpc RotateSecret(RotateSecretRequest) returns (RotateSecretResponse);
-}
-
-message CreateSecretRequest {
-  string description = 1;
-}
-
-message CreateSecretResponse {
-  Secret secret = 1;
-}
-
-message RotateSecretResponse {
-  Secret secret = 1;
-}
-
-message ListSecretsRequest {
-  string user_id = 1;
-}
-
-message ListSecretsResponse {
-  repeated Secret secrets = 1;
-}
-
-message DeleteSecretRequest {
-  string secret_id = 1;
-}
-
-message DeleteSecretResponse {}
-
-message VerifySecretRequest {
-  string api_key = 1;
-  string api_secret = 2;
-}
-
-message VerifySecretResponse {
-  Claims claims = 1;
-}
-
-message RotateSecretRequest {
-  string secret_id = 1;
-}
-
 // --- Common Types ---
 
 // Claims contains the standard claims extracted from a verified token.
@@ -255,14 +196,4 @@ message Session {
   google.protobuf.Timestamp expires_at = 4;
   string user_agent = 5;
   string ip = 6;
-}
-
-// Secret represents an API key/secret pair.
-message Secret {
-  string id = 1;
-  string api_key = 2;
-  string api_secret = 3;
-  string description = 4;
-  google.protobuf.Timestamp created_at = 5;
-  google.protobuf.Timestamp expires_at = 6;
 }

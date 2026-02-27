@@ -197,23 +197,6 @@ func TestClaimsStructure(t *testing.T) {
 	}
 }
 
-// TestSecretStructure 驗證 Secret 結構
-func TestSecretStructure(t *testing.T) {
-	secret := &iamv1.Secret{
-		Id:        "secret-123",
-		ApiKey:    "key-abc123",
-		ApiSecret: "secret-xyz789",
-		CreatedAt: timestamppb.Now(),
-		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
-	}
-
-	if secret.Id != "secret-123" || secret.ApiKey != "key-abc123" {
-		t.Error("❌ Secret 結構驗證失敗")
-	} else {
-		t.Log("✅ Secret 結構驗證成功")
-	}
-}
-
 // TestRoleConversion 驗證角色轉換
 func TestRoleConversion(t *testing.T) {
 	protoRoles := []*iamv1.Role{

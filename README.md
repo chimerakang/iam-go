@@ -8,7 +8,7 @@ Go SDK for Identity and Access Management — Authentication, Authorization, and
 
 - **Verify JWT tokens** locally via JWKS (RS256 public key) — no network calls
 - **Check permissions** with local caching
-- **Manage API Keys** for service-to-service authentication
+- **OAuth2 Client Credentials** for service-to-service authentication
 - **Inject tenant context** automatically via middleware
 
 The SDK is **backend-agnostic** — all services are defined as interfaces. Concrete implementations (gRPC, REST, in-memory) are injected via the Option pattern.
@@ -17,7 +17,7 @@ The SDK is **backend-agnostic** — all services are defined as interfaces. Conc
 >
 > Any IAM server that implements the **P0 Requirements** (see [Roadmap](docs/ROADMAP.md)):
 > - **P0.1**: RS256 JWT signing + JWKS endpoint
-> - **P0.2**: API Key/Secret management service
+> - **P0.2**: OAuth2 Client Credentials Grant (service-to-service)
 > - **P0.3**: IAM service API for external token verification and permission checking
 >
 > Once your IAM server implements these, any service using `iam-go` can authenticate and authorize without vendor lock-in.
@@ -39,7 +39,7 @@ Your Service (Kratos-based)
     │                                    (works with both HTTP and gRPC)
     └── client.Authz().Check()         ← Direct permission query
         client.Users().GetCurrent()
-        client.Secrets().Verify()
+        client.OAuth2().GetCachedToken() ← OAuth2 M2M token
 ```
 
 ## Installation
@@ -63,10 +63,11 @@ func main() {
     // Initialize IAM client with injected implementations
     client, err := iam.NewClient(
         iam.Config{
-            Endpoint: "iam-server:9000",
-            JWKSUrl:  "https://auth.example.com/.well-known/jwks.json",
-            APIKey:   os.Getenv("IAM_API_KEY"),
-            APISecret: os.Getenv("IAM_API_SECRET"),
+            Endpoint:           "iam-server:9000",
+            JWKSUrl:            "https://auth.example.com/.well-known/jwks.json",
+            OAuth2ClientID:     os.Getenv("IAM_OAUTH2_CLIENT_ID"),
+            OAuth2ClientSecret: os.Getenv("IAM_OAUTH2_CLIENT_SECRET"),
+            OAuth2TokenURL:     os.Getenv("IAM_OAUTH2_TOKEN_URL"),
         },
         iam.WithTokenVerifier(myVerifier),
         iam.WithAuthorizer(myAuthz),
@@ -108,7 +109,7 @@ The root package defines these interfaces — implement them to integrate with a
 | `UserService` | User CRUD and role queries |
 | `TenantService` | Tenant resolution and membership |
 | `SessionService` | Session management |
-| `SecretService` | API key/secret lifecycle |
+| `OAuth2TokenExchanger` | OAuth2 client credentials token exchange |
 
 ## Authentication Methods
 
@@ -118,10 +119,10 @@ The root package defines these interfaces — implement them to integrate with a
 kratosmw.Auth(client)
 ```
 
-### API Key/Secret (for services)
+### OAuth2 Client Credentials (for services)
 ```go
-// Service-to-service authentication via header
-kratosmw.APIKey(client)
+// Service-to-service authentication via OAuth2 token
+kratosmw.OAuth2ClientCredentials(client)
 ```
 
 ## Proto-first Development

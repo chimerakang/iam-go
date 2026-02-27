@@ -58,20 +58,12 @@ type SessionService interface {
 	RevokeAllOthers(ctx context.Context) error
 }
 
-// SecretService manages API key/secret pairs for service-to-service authentication.
-type SecretService interface {
-	// Create generates a new API key/secret pair.
-	Create(ctx context.Context, description string) (*Secret, error)
+// OAuth2TokenExchanger exchanges OAuth2 client credentials for access tokens.
+// Implementations should handle token caching and automatic refresh.
+type OAuth2TokenExchanger interface {
+	// ExchangeToken requests a new access token using client credentials.
+	ExchangeToken(ctx context.Context, scopes []string) (*OAuth2Token, error)
 
-	// List returns all API keys (secrets are not included).
-	List(ctx context.Context) ([]Secret, error)
-
-	// Delete revokes an API key.
-	Delete(ctx context.Context, secretID string) error
-
-	// Verify validates an API key/secret pair and returns the associated claims.
-	Verify(ctx context.Context, apiKey, apiSecret string) (*Claims, error)
-
-	// Rotate regenerates the secret for an existing API key.
-	Rotate(ctx context.Context, secretID string) (*Secret, error)
+	// GetCachedToken returns a valid cached token, or fetches a new one if expired.
+	GetCachedToken(ctx context.Context) (string, error)
 }

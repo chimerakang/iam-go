@@ -48,14 +48,13 @@ type Session struct {
 	IP        string
 }
 
-// Secret represents an API key/secret pair for service-to-service authentication.
-type Secret struct {
-	ID          string
-	APIKey      string
-	APISecret   string // Only populated on Create or Rotate.
-	Description string
-	CreatedAt   time.Time
+// OAuth2Token represents an OAuth2 access token response.
+type OAuth2Token struct {
+	AccessToken string
+	TokenType   string // "Bearer"
+	ExpiresIn   int32
 	ExpiresAt   time.Time
+	Scope       string
 }
 
 // ListOptions holds pagination parameters.

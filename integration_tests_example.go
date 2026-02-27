@@ -88,20 +88,42 @@ func TestMultiTenantIsolation(t *testing.T) {
 	}
 }
 
-// TestAPIKeyAuthentication demonstrates API key/secret verification
-func TestAPIKeyAuthentication(t *testing.T) {
-	client := fake.NewClient()
+// TestOAuth2ClientCredentials demonstrates OAuth2 client credentials token exchange
+func TestOAuth2ClientCredentials(t *testing.T) {
+	client := fake.NewClient(
+		fake.WithOAuth2App("test-client-id", "test-client-secret", []string{"read", "write"}),
+	)
 
 	ctx := context.Background()
 
-	// Verify with valid secret (fake always succeeds for demo)
-	ok, err := client.Secrets().Verify(ctx, "api_key_123", "sk_live_secret456")
-	if err == nil {
-		// Verification succeeded (as expected with fake)
-		_ = ok
+	// Exchange client credentials for access token
+	exchanger := client.OAuth2()
+	if exchanger == nil {
+		t.Fatal("OAuth2 exchanger should be configured")
 	}
 
-	// In production with real backend, verify would validate against stored hash
+	token, err := exchanger.ExchangeToken(ctx, []string{"read"})
+	if err != nil {
+		t.Fatalf("token exchange failed: %v", err)
+	}
+
+	if token.AccessToken == "" {
+		t.Error("access token should not be empty")
+	}
+
+	if token.TokenType != "Bearer" {
+		t.Errorf("expected token type 'Bearer', got '%s'", token.TokenType)
+	}
+
+	// GetCachedToken returns a ready-to-use token string
+	cachedToken, err := exchanger.GetCachedToken(ctx)
+	if err != nil {
+		t.Fatalf("get cached token failed: %v", err)
+	}
+
+	if cachedToken == "" {
+		t.Error("cached token should not be empty")
+	}
 }
 
 // TestPermissionChecking demonstrates permission verification with caching
@@ -360,10 +382,10 @@ func TestErrorHandling(t *testing.T) {
 		t.Error("expected error for non-existent user")
 	}
 
-	// Test invalid API key
-	_, err = client.Secrets().Verify(ctx, "invalid_key", "invalid_secret")
-	if err == nil {
-		t.Error("expected error for invalid API key")
+	// Test OAuth2 without configuration
+	exchanger := client.OAuth2()
+	if exchanger != nil {
+		t.Error("OAuth2 exchanger should be nil for unconfigured client")
 	}
 
 	// Test invalid tenant

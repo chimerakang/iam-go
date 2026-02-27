@@ -5,7 +5,7 @@
 Build a Kratos + Proto-first Go SDK for Identity and Access Management, providing:
 - Token verification (JWT via JWKS, standard RFC 7517)
 - Permission checking (with local caching)
-- API Key authentication (service-to-service)
+- OAuth2 Client Credentials (service-to-service)
 - Multi-tenancy context injection
 - Middleware for Kratos (primary) and pure gRPC
 
@@ -25,20 +25,20 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [ ] Implement `GET /.well-known/jwks.json` endpoint
 - [ ] Key rotation support (multiple active keys)
 
-### P0.2 API Key/Secret Management
-**Priority:** Critical | **Effort:** 3-4 days | **Location:** IAM server repo
+### P0.2 OAuth2 Client Credentials Grant
+**Priority:** Critical | **Effort:** 2-3 days | **Location:** IAM server repo
 
-- [ ] Secret CRUD: Create, List, Delete, Verify, Rotate
-- [ ] Database: `api_secrets` table
-- [ ] API Key authentication as alternative to JWT
-- [ ] Rate limiting per API key
+- [ ] OAuth2 token endpoint (`POST /oauth2/token`)
+- [ ] Client credentials registration and management
+- [ ] Access token issuance with configurable scopes and TTL
+- [ ] Rate limiting per client ID
 
 ### P0.3 IAM Service for External Consumers
 **Priority:** Critical | **Effort:** 2-3 days | **Location:** IAM server repo
 
 - [ ] Endpoints: IntrospectToken, CheckPermission, GetUserPermissions, ValidateTenantMembership
 - [ ] Expose service port for external consumers
-- [ ] Authentication via API Key for service-to-service calls
+- [ ] Authentication via OAuth2 Bearer token for service-to-service calls
 
 ---
 
@@ -61,7 +61,7 @@ Before the SDK can be used, the IAM server needs these capabilities:
 
 - [x] `Config` struct with validation
 - [x] Option pattern for injecting service implementations
-- [x] Accessor methods: `Verifier()`, `Authz()`, `Users()`, `Tenants()`, `Sessions()`, `Secrets()`
+- [x] Accessor methods: `Verifier()`, `Authz()`, `Users()`, `Tenants()`, `Sessions()`, `OAuth2()`
 - [x] Context helpers: `WithUserID()`, `UserIDFromContext()`, etc.
 - [ ] Connection health check
 - [ ] Graceful shutdown (Close)
@@ -75,13 +75,13 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] `UserService` interface
 - [x] `TenantService` interface
 - [x] `SessionService` interface
-- [x] `SecretService` interface
-- [x] Domain types: Claims, User, Role, Tenant, Session, Secret, ListOptions
+- [x] `OAuth2TokenExchanger` interface
+- [x] Domain types: Claims, User, Role, Tenant, Session, OAuth2Token, ListOptions
 
 ### P1.4 Proto Definitions
 **Priority:** Critical | **Effort:** Done | **Package:** `proto/iam/v1/`
 
-- [x] Define proto service contracts (AuthzService, UserService, TenantService, SessionService, SecretService)
+- [x] Define proto service contracts (AuthzService, UserService, TenantService, SessionService)
 - [x] Define proto message types aligned with Go domain types
 - [x] `buf.yaml` and `buf.gen.yaml` configuration
 - [x] Makefile targets for proto generation
@@ -99,7 +99,7 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] `Tenant(client)` — Validates tenant membership via `client.Tenants()`
 - [x] `Require(client, permission)` — Permission gate via `client.Authz()`
 - [x] `RequireAny(client, ...permissions)` — Any-of permission gate
-- [x] `APIKey(client)` — API Key authentication via `client.Secrets()`
+- [x] `OAuth2ClientCredentials(client)` — OAuth2 client credentials via `client.OAuth2()`
 - [x] Works with both HTTP and gRPC transports
 - [x] Excluded operations configuration
 - [ ] Integration tests with Kratos server
@@ -148,7 +148,7 @@ reference implementations or backend-specific adapters.
 - [x] `fake.WithUser(id, tenantID, email, roles)` — Configure test user
 - [x] `fake.WithTenant(id, slug, status)` — Configure test tenant
 - [x] `fake.WithPermissions(userID, perms)` — Configure permission rules
-- [x] `fake.WithAPIKey(key, secret, userID)` — Configure test API key
+- [x] `fake.WithOAuth2App(clientID, clientSecret, scopes)` — Configure test OAuth2 app
 - [x] Implements all `iam.*` interfaces
 - [x] Full unit tests
 
@@ -157,7 +157,7 @@ reference implementations or backend-specific adapters.
 
 - [ ] Docker Compose test environment (IAM server + PostgreSQL + Redis)
 - [ ] End-to-end test: login → get token → verify → check permission
-- [ ] End-to-end test: API key creation → service auth → permission check
+- [ ] End-to-end test: OAuth2 client credentials → token exchange → service auth
 - [ ] Multi-tenant isolation test
 - [ ] Token refresh and revocation test
 
@@ -228,11 +228,11 @@ reference implementations or backend-specific adapters.
 - Reduces latency to ~0ms for cached decisions
 - Cache invalidation via TTL (future: event-driven)
 
-### 5. API Key for Service-to-Service
-- Long-lived credentials (unlike JWT)
-- No login flow required
-- Per-service key isolation
-- Can be rotated without downtime
+### 5. OAuth2 Client Credentials for Service-to-Service
+- Standard RFC 6749 grant type for M2M authentication
+- No login flow required — client ID + secret exchange for access token
+- Token caching with automatic refresh before expiry
+- Singleflight to prevent thundering herd on concurrent requests
 
 ---
 

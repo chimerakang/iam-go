@@ -73,8 +73,8 @@ func TestNewClient_NilServicesBeforeInjection(t *testing.T) {
 	if c.Sessions() != nil {
 		t.Error("Sessions() should be nil before injection")
 	}
-	if c.Secrets() != nil {
-		t.Error("Secrets() should be nil before injection")
+	if c.OAuth2() != nil {
+		t.Error("OAuth2() should be nil before injection")
 	}
 }
 

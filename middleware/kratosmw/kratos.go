@@ -155,36 +155,26 @@ func RequireAny(client *iam.Client, permissions ...string) middleware.Middleware
 	}
 }
 
-// APIKey returns Kratos middleware that authenticates via API key/secret headers.
-// Looks for X-API-Key and X-API-Secret in transport headers.
-func APIKey(client *iam.Client) middleware.Middleware {
+// OAuth2ClientCredentials returns Kratos client-side middleware that injects
+// an OAuth2 Bearer token into outgoing requests using client credentials.
+// The token is automatically cached and refreshed before expiry.
+func OAuth2ClientCredentials(client *iam.Client) middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (interface{}, error) {
-			tr, ok := transport.FromServerContext(ctx)
-			if !ok {
-				return handler(ctx, req)
+			exchanger := client.OAuth2()
+			if exchanger == nil {
+				return nil, errors.InternalServer("INTERNAL", "oauth2 exchanger not configured")
 			}
 
-			apiKey := tr.RequestHeader().Get("X-API-Key")
-			apiSecret := tr.RequestHeader().Get("X-API-Secret")
-			if apiKey == "" || apiSecret == "" {
-				return nil, errors.Unauthorized("UNAUTHORIZED", "missing API key or secret")
-			}
-
-			svc := client.Secrets()
-			if svc == nil {
-				return nil, errors.InternalServer("INTERNAL", "secret service not configured")
-			}
-
-			claims, err := svc.Verify(ctx, apiKey, apiSecret)
+			token, err := exchanger.GetCachedToken(ctx)
 			if err != nil {
-				return nil, errors.Unauthorized("UNAUTHORIZED", "invalid API credentials")
+				return nil, errors.Unauthorized("UNAUTHORIZED", "failed to obtain oauth2 token")
 			}
 
-			ctx = iam.WithClaims(ctx, claims)
-			ctx = iam.WithUserID(ctx, claims.Subject)
-			ctx = iam.WithTenantID(ctx, claims.TenantID)
-			ctx = iam.WithRoles(ctx, claims.Roles)
+			tr, ok := transport.FromClientContext(ctx)
+			if ok {
+				tr.RequestHeader().Set("Authorization", "Bearer "+token)
+			}
 
 			return handler(ctx, req)
 		}

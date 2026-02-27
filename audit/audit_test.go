@@ -16,7 +16,7 @@ func TestEventEmission(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, e)
 	}))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	event := Event{
 		Action:   "auth",
@@ -61,7 +61,7 @@ func TestMultipleHandlers(t *testing.T) {
 	}
 
 	logger := New(10, WithHandler(handler1), WithHandler(handler2))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	event := Event{Action: "test", Result: "success"}
 	logger.Log(event)
@@ -83,7 +83,7 @@ func TestMultipleHandlers(t *testing.T) {
 
 func TestContextStorage(t *testing.T) {
 	logger := New(10)
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	ctx := context.Background()
 	ctx = WithContext(ctx, logger)
@@ -109,7 +109,7 @@ func TestEventTimestamp(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, e)
 	}))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	now := time.Now()
 	event := Event{Action: "test", Result: "success"}
@@ -135,7 +135,7 @@ func TestQueueBuffer(t *testing.T) {
 		count++
 		time.Sleep(50 * time.Millisecond) // Simulate slow handler
 	}))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// Emit 5 events (fill buffer)
 	for i := 0; i < 5; i++ {
@@ -162,7 +162,7 @@ func TestErrorEvent(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, e)
 	}))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	event := Event{
 		Action: "auth",
@@ -198,7 +198,7 @@ func TestAuditEventFields(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, e)
 	}))
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	event := Event{
 		UserID:    "user123",

@@ -23,6 +23,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Demonstrate usage patterns (referenced in documentation).
+var (
+	_ = exampleGetUser
+	_ = adminInterceptor
+)
+
 func main() {
 	// Create IAM client with fake backend for demo.
 	// In production, inject real implementations via iam.With*() options.
@@ -30,7 +36,7 @@ func main() {
 		fake.WithUser("service-123", "tenant-001", "service@example.com", []string{"admin"}),
 		fake.WithPermissions("service-123", []string{"users:read", "users:write"}),
 	)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Create standard gRPC server with IAM interceptors
 	srv := grpc.NewServer(

@@ -34,6 +34,7 @@ import (
 	iamv1 "github.com/chimerakang/iam-go/proto/iam/v1"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Client 包裝 gRPC 連接到 Valhalla IAM 服務
@@ -64,10 +65,10 @@ type Client struct {
 func NewClient(target string, opts ...grpc.DialOption) (*Client, error) {
 	if len(opts) == 0 {
 		// 預設不安全連接（開發用）
-		opts = []grpc.DialOption{grpc.WithInsecure()}
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
 
-	conn, err := grpc.Dial(target, opts...)
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial Valhalla: %w", err)
 	}
@@ -173,7 +174,9 @@ func (v *valhallaTokenVerifier) fetchJWKS(ctx context.Context) (*JWKS, error) {
 	if v.jwksCache != nil && time.Since(v.jwksCacheTime) < v.jwksCacheTTL {
 		data, _ := json.Marshal(v.jwksCache)
 		jwks := &JWKS{}
-		json.Unmarshal(data, jwks)
+		if err := json.Unmarshal(data, jwks); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal cached JWKS: %w", err)
+		}
 		return jwks, nil
 	}
 
@@ -187,7 +190,7 @@ func (v *valhallaTokenVerifier) fetchJWKS(ctx context.Context) (*JWKS, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -202,7 +205,9 @@ func (v *valhallaTokenVerifier) fetchJWKS(ctx context.Context) (*JWKS, error) {
 	// Cache the result
 	v.jwksCache = make(map[string]interface{})
 	jwksData, _ := json.Marshal(jwks)
-	json.Unmarshal(jwksData, &v.jwksCache)
+	if err := json.Unmarshal(jwksData, &v.jwksCache); err != nil {
+		return nil, fmt.Errorf("failed to cache JWKS: %w", err)
+	}
 	v.jwksCacheTime = time.Now()
 
 	return jwks, nil

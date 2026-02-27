@@ -14,7 +14,7 @@ service AuthzService {
   rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
 
   // CheckResourcePermission returns whether the user can perform an action on a resource.
-  rpc CheckResourcePermission(CheckResourcePermissionRequest) returns (CheckPermissionResponse);
+  rpc CheckResourcePermission(CheckResourcePermissionRequest) returns (CheckResourcePermissionResponse);
 
   // GetPermissions returns all permissions granted to the user.
   rpc GetPermissions(GetPermissionsRequest) returns (GetPermissionsResponse);
@@ -35,6 +35,10 @@ message CheckPermissionResponse {
   bool allowed = 1;
 }
 
+message CheckResourcePermissionResponse {
+  bool allowed = 1;
+}
+
 message GetPermissionsRequest {
   string user_id = 1;
 }
@@ -48,7 +52,7 @@ message GetPermissionsResponse {
 // UserService provides user information retrieval.
 service UserService {
   // GetUser returns a user by ID.
-  rpc GetUser(GetUserRequest) returns (User);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
 
   // ListUsers returns a paginated list of users.
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
@@ -59,6 +63,10 @@ service UserService {
 
 message GetUserRequest {
   string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
 }
 
 message ListUsersRequest {
@@ -84,7 +92,7 @@ message GetUserRolesResponse {
 // TenantService provides tenant resolution and membership validation.
 service TenantService {
   // ResolveTenant looks up a tenant by ID or slug.
-  rpc ResolveTenant(ResolveTenantRequest) returns (Tenant);
+  rpc ResolveTenant(ResolveTenantRequest) returns (ResolveTenantResponse);
 
   // ValidateMembership checks if a user belongs to a tenant.
   rpc ValidateMembership(ValidateMembershipRequest) returns (ValidateMembershipResponse);
@@ -92,6 +100,10 @@ service TenantService {
 
 message ResolveTenantRequest {
   string identifier = 1;
+}
+
+message ResolveTenantResponse {
+  Tenant tenant = 1;
 }
 
 message ValidateMembershipRequest {
@@ -143,7 +155,7 @@ message RevokeAllOtherSessionsResponse {}
 // SecretService manages API key/secret pairs for service-to-service authentication.
 service SecretService {
   // CreateSecret generates a new API key/secret pair.
-  rpc CreateSecret(CreateSecretRequest) returns (Secret);
+  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
 
   // ListSecrets returns all API keys for a user (secrets not included).
   rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
@@ -155,11 +167,19 @@ service SecretService {
   rpc VerifySecret(VerifySecretRequest) returns (VerifySecretResponse);
 
   // RotateSecret regenerates the secret for an existing API key.
-  rpc RotateSecret(RotateSecretRequest) returns (Secret);
+  rpc RotateSecret(RotateSecretRequest) returns (RotateSecretResponse);
 }
 
 message CreateSecretRequest {
   string description = 1;
+}
+
+message CreateSecretResponse {
+  Secret secret = 1;
+}
+
+message RotateSecretResponse {
+  Secret secret = 1;
 }
 
 message ListSecretsRequest {

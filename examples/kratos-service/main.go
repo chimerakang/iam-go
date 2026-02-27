@@ -21,6 +21,13 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
+// Demonstrate usage patterns (referenced in documentation).
+var (
+	_ = adminOnlyMiddleware
+	_ = editorMiddleware
+	_ = exampleHandler
+)
+
 func main() {
 	// Create IAM client with fake backend for demo.
 	// In production, inject real implementations via iam.With*() options.
@@ -30,7 +37,7 @@ func main() {
 		fake.WithPermissions("user-123", []string{"users:read", "users:write", "admin:*"}),
 		fake.WithAPIKey("ak_test", "sk_test", "user-123"),
 	)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// IAM middleware stack
 	iamMiddleware := []middleware.Middleware{

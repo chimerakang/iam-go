@@ -72,9 +72,9 @@ func TestResolve_Cached(t *testing.T) {
 	svc := New(backend)
 
 	// First call
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 	// Second call (should be cached)
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 
 	if backend.resolveCalls != 1 {
 		t.Errorf("expected 1 backend call (cached), got %d", backend.resolveCalls)
@@ -97,9 +97,9 @@ func TestResolve_NotFound_Cached(t *testing.T) {
 	svc := New(backend)
 
 	// First call (not found)
-	svc.Resolve(context.Background(), "unknown")
+	_, _ = svc.Resolve(context.Background(), "unknown")
 	// Second call (should be cached)
-	svc.Resolve(context.Background(), "unknown")
+	_, _ = svc.Resolve(context.Background(), "unknown")
 
 	if backend.resolveCalls != 1 {
 		t.Errorf("expected 1 backend call (negative cached), got %d", backend.resolveCalls)
@@ -115,11 +115,11 @@ func TestResolve_TTLExpiration(t *testing.T) {
 	svc := New(backend, WithTTL(100*time.Millisecond))
 
 	// First call
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 	// Wait for TTL to expire
 	time.Sleep(150 * time.Millisecond)
 	// Second call (should hit backend again)
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 
 	if backend.resolveCalls != 2 {
 		t.Errorf("expected 2 backend calls (after TTL), got %d", backend.resolveCalls)
@@ -174,9 +174,9 @@ func TestValidateMembership_Cached(t *testing.T) {
 	svc := New(backend)
 
 	// First call
-	svc.ValidateMembership(context.Background(), "user123", "tenant456")
+	_, _ = svc.ValidateMembership(context.Background(), "user123", "tenant456")
 	// Second call (should be cached)
-	svc.ValidateMembership(context.Background(), "user123", "tenant456")
+	_, _ = svc.ValidateMembership(context.Background(), "user123", "tenant456")
 
 	if backend.membershipCalls != 1 {
 		t.Errorf("expected 1 backend call (cached), got %d", backend.membershipCalls)
@@ -193,8 +193,8 @@ func TestValidateMembership_MultipleUsers(t *testing.T) {
 	svc := New(backend)
 
 	// Different users should not share cache
-	svc.ValidateMembership(context.Background(), "user1", "tenant1")
-	svc.ValidateMembership(context.Background(), "user2", "tenant1")
+	_, _ = svc.ValidateMembership(context.Background(), "user1", "tenant1")
+	_, _ = svc.ValidateMembership(context.Background(), "user2", "tenant1")
 
 	if backend.membershipCalls != 2 {
 		t.Errorf("expected 2 backend calls (different users), got %d", backend.membershipCalls)
@@ -238,11 +238,11 @@ func TestClearCache(t *testing.T) {
 	svc := New(backend)
 
 	// Populate cache
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 	// Clear cache
 	svc.ClearCache()
 	// Next call should hit backend
-	svc.Resolve(context.Background(), "acme")
+	_, _ = svc.Resolve(context.Background(), "acme")
 
 	if backend.resolveCalls != 2 {
 		t.Errorf("expected 2 backend calls (after clear), got %d", backend.resolveCalls)

@@ -39,14 +39,16 @@ Thumbs.db
 *.pfx
 credentials.json
 
-# Claude Code sub-package instructions
-docs/CLAUDE.md
-fake/CLAUDE.md
-jwks/CLAUDE.md
-middleware/CLAUDE.md
+# Claude Code instructions
+CLAUDE.md
+**/CLAUDE.md
 
 # Vendor (optional)
 # vendor/
+
+# Generated reports
+P10.*_REPORT.md
+*_REPORT.md
 
 # Debug
 __debug_bin*

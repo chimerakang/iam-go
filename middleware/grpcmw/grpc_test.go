@@ -171,9 +171,12 @@ func TestExtractBearerFromMD_NoBearer(t *testing.T) {
 	}
 }
 
+// testCtxKey is a custom type for context keys in tests to satisfy SA1029.
+type testCtxKey string
+
 func TestWrappedStream_Context(t *testing.T) {
 	// Create a wrapped stream with a custom context
-	customCtx := context.WithValue(context.Background(), "key", "value")
+	customCtx := context.WithValue(context.Background(), testCtxKey("key"), "value")
 
 	// Create a mock stream with different context
 	mockStream := &mockServerStream{ctx: context.Background()}

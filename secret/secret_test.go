@@ -333,7 +333,7 @@ func TestCRUDLifecycle(t *testing.T) {
 	}
 
 	// 6. Delete
-	svc.Delete(ctx, s2.ID)
+	_ = svc.Delete(ctx, s2.ID)
 
 	// 7. List again
 	secrets, _ = svc.List(ctx)

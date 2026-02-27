@@ -230,14 +230,14 @@ func TestClearCache(t *testing.T) {
 	ctx = iam.WithTenantID(ctx, "tenant-1")
 
 	// Populate cache
-	a.Check(ctx, "users:read")
+	_, _ = a.Check(ctx, "users:read")
 	callCount1 := backend.callCount
 
 	// Clear cache
 	a.ClearCache()
 
 	// Next call should hit backend
-	a.Check(ctx, "users:read")
+	_, _ = a.Check(ctx, "users:read")
 	callCount2 := backend.callCount
 
 	if callCount2 != callCount1+1 {

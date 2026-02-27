@@ -43,7 +43,7 @@ func jwksServer(t *testing.T, kid string, pub *rsa.PublicKey) *httptest.Server {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -170,7 +170,7 @@ func TestVerify_KidMismatchTriggersRefresh(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

@@ -1,0 +1,25 @@
+#!/bin/sh
+# Git pre-push hook: auto-run CI checks before push
+# Install: make hooks
+
+echo ""
+echo "========================================="
+echo "  Pre-push: Running local CI checks..."
+echo "========================================="
+echo ""
+
+make ci
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "========================================="
+  echo "  CI failed. Push blocked."
+  echo "  Fix errors above, then git push again."
+  echo "========================================="
+  echo ""
+  echo "To force (not recommended): git push --no-verify"
+  exit 1
+fi
+
+echo ""
+echo "CI passed. Pushing..."

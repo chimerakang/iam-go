@@ -44,7 +44,7 @@ func WithStdoutHandler() Option {
 	return func(l *Logger) {
 		l.AddHandler(func(e Event) {
 			data, _ := json.Marshal(e)
-			fmt.Fprintf(os.Stdout, "%s\n", data)
+			_, _ = fmt.Fprintf(os.Stdout, "%s\n", data)
 		})
 	}
 }

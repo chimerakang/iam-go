@@ -24,7 +24,6 @@ type state struct {
 	permissions map[string]map[string]bool // userID → permission → allowed
 	sessions    map[string][]*iam.Session  // userID → sessions
 	oauth2App   *oauth2AppEntry            // OAuth2 application credentials
-	nextID      int
 }
 
 type oauth2AppEntry struct {

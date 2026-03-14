@@ -62,3 +62,25 @@ type ListOptions struct {
 	Page     int
 	PageSize int
 }
+
+// LoginRequest holds the parameters for user authentication.
+type LoginRequest struct {
+	Email    string // User email address
+	Password string // User password
+	TenantID string // Optional tenant ID for multi-tenant systems
+	ClientID string // Optional OAuth2 Application client_id (auto-injected by adapters)
+}
+
+// LoginResponse contains the result of a successful authentication.
+type LoginResponse struct {
+	User   *User        // Authenticated user information
+	Tokens *TokenPair   // Access and refresh tokens
+}
+
+// TokenPair holds access and refresh tokens from authentication.
+type TokenPair struct {
+	AccessToken  string // JWT access token
+	RefreshToken string // Refresh token for token renewal
+	ExpiresIn    int32  // Token expiry duration in seconds
+	TokenType    string // Token type (typically "Bearer")
+}

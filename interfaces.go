@@ -67,3 +67,13 @@ type OAuth2TokenExchanger interface {
 	// GetCachedToken returns a valid cached token, or fetches a new one if expired.
 	GetCachedToken(ctx context.Context) (string, error)
 }
+
+// AuthService provides user authentication (login/register).
+// When used via an external application, implementations should automatically
+// inject the application's client_id so that the resulting User JWT contains
+// app_id and app_scopes claims.
+type AuthService interface {
+	// Login authenticates a user with email and password.
+	// Returns the authenticated user and token pair.
+	Login(ctx context.Context, req LoginRequest) (*LoginResponse, error)
+}

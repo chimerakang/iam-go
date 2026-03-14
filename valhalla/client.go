@@ -53,6 +53,10 @@ type Client struct {
 	users    iam.UserService
 	tenants  iam.TenantService
 	sessions iam.SessionService
+	auth     iam.AuthService
+
+	// Configuration
+	clientID string // OAuth2 Application client_id (auto-injected into Login)
 
 	// 當前用戶上下文（從 token 中提取）
 	currentUserID   string
@@ -92,8 +96,22 @@ func NewClient(target string, opts ...grpc.DialOption) (*Client, error) {
 	client.users = &valhallaUserService{userClient: client.userClient, client: client}
 	client.tenants = &valhallaTenantService{tenantClient: client.tenantClient}
 	client.sessions = &valhallaSessionService{sessionClient: client.sessionClient, client: client}
+	client.auth = &valhallaAuthService{
+		httpClient: httpClient,
+		baseURL:    fmt.Sprintf("http://%s", target),
+		clientID:   client.clientID,
+	}
 
 	return client, nil
+}
+
+// SetClientID sets the OAuth2 Application client_id for auto-injection into Login requests.
+// Must be called before Login if not set via NewClientWithConfig.
+func (c *Client) SetClientID(clientID string) {
+	c.clientID = clientID
+	if authSvc, ok := c.auth.(*valhallaAuthService); ok {
+		authSvc.clientID = clientID
+	}
 }
 
 // Close 關閉到 Valhalla 的連接
@@ -124,6 +142,11 @@ func (c *Client) Tenants() iam.TenantService {
 // Sessions 返回 SessionService 實現
 func (c *Client) Sessions() iam.SessionService {
 	return c.sessions
+}
+
+// Auth 返回 AuthService 實現
+func (c *Client) Auth() iam.AuthService {
+	return c.auth
 }
 
 // SetCurrentUser 設置當前用戶上下文（通常在驗證 token 後調用）

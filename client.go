@@ -32,6 +32,7 @@ type Client struct {
 	tenants   TenantService
 	sessions  SessionService
 	oauth2    OAuth2TokenExchanger
+	auth      AuthService
 }
 
 // Config holds connection and behavior configuration.
@@ -107,6 +108,11 @@ func WithOAuth2Exchanger(e OAuth2TokenExchanger) Option {
 	return func(c *Client) { c.oauth2 = e }
 }
 
+// WithAuthService sets the authentication service implementation.
+func WithAuthService(a AuthService) Option {
+	return func(c *Client) { c.auth = a }
+}
+
 // DefaultCacheTTL is the default duration for caching permission decisions.
 const DefaultCacheTTL = 5 * time.Minute
 
@@ -147,12 +153,15 @@ func (c *Client) Sessions() SessionService { return c.sessions }
 // OAuth2 returns the OAuth2 token exchanger, or nil if not configured.
 func (c *Client) OAuth2() OAuth2TokenExchanger { return c.oauth2 }
 
+// Auth returns the authentication service, or nil if not configured.
+func (c *Client) Auth() AuthService { return c.auth }
+
 // HealthCheck performs a basic connectivity check to ensure the client is ready.
 // It attempts to verify a dummy context without a token to check if the system is responsive.
 // Returns nil if healthy, or an error if the client is not properly configured or unreachable.
 func (c *Client) HealthCheck(ctx context.Context) error {
 	if c.verifier == nil && c.authz == nil && c.users == nil &&
-		c.tenants == nil && c.sessions == nil && c.oauth2 == nil {
+		c.tenants == nil && c.sessions == nil && c.oauth2 == nil && c.auth == nil {
 		return fmt.Errorf("iam: no services configured — at least one service is required for health check")
 	}
 
@@ -166,7 +175,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 func (c *Client) Close() error {
 	closers := []interface{}{
 		c.verifier, c.authz, c.users,
-		c.tenants, c.sessions, c.oauth2,
+		c.tenants, c.sessions, c.oauth2, c.auth,
 	}
 	var firstErr error
 	for _, svc := range closers {

@@ -362,8 +362,12 @@ type valhallaAuthorizer struct {
 }
 
 func (a *valhallaAuthorizer) Check(ctx context.Context, permission string) (bool, error) {
+	userID := iam.UserIDFromContext(ctx)
+	if userID == "" {
+		return false, fmt.Errorf("iam/authz: no user_id in context — Auth middleware must run first")
+	}
 	resp, err := a.authzClient.CheckPermission(ctx, &iamv1.CheckPermissionRequest{
-		UserId:     a.client.currentUserID,
+		UserId:     userID,
 		Permission: permission,
 	})
 	if err != nil {
@@ -373,8 +377,12 @@ func (a *valhallaAuthorizer) Check(ctx context.Context, permission string) (bool
 }
 
 func (a *valhallaAuthorizer) CheckResource(ctx context.Context, resource, action string) (bool, error) {
+	userID := iam.UserIDFromContext(ctx)
+	if userID == "" {
+		return false, fmt.Errorf("iam/authz: no user_id in context — Auth middleware must run first")
+	}
 	resp, err := a.authzClient.CheckResourcePermission(ctx, &iamv1.CheckResourcePermissionRequest{
-		UserId:   a.client.currentUserID,
+		UserId:   userID,
 		Resource: resource,
 		Action:   action,
 	})
@@ -385,8 +393,12 @@ func (a *valhallaAuthorizer) CheckResource(ctx context.Context, resource, action
 }
 
 func (a *valhallaAuthorizer) GetPermissions(ctx context.Context) ([]string, error) {
+	userID := iam.UserIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("iam/authz: no user_id in context — Auth middleware must run first")
+	}
 	resp, err := a.authzClient.GetPermissions(ctx, &iamv1.GetPermissionsRequest{
-		UserId: a.client.currentUserID,
+		UserId: userID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get permissions: %w", err)

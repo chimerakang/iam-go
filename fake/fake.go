@@ -17,19 +17,27 @@ import (
 type Option func(*state)
 
 type state struct {
-	mu          sync.RWMutex
-	users       map[string]*iam.User       // userID → User
-	tenants     map[string]*iam.Tenant     // tenantID → Tenant
-	tenantSlugs map[string]string          // slug → tenantID
-	permissions map[string]map[string]bool // userID → permission → allowed
-	sessions    map[string][]*iam.Session  // userID → sessions
-	oauth2App   *oauth2AppEntry            // OAuth2 application credentials
+	mu           sync.RWMutex
+	users        map[string]*iam.User         // userID → User
+	tenants      map[string]*iam.Tenant       // tenantID → Tenant
+	tenantSlugs  map[string]string            // slug → tenantID
+	permissions  map[string]map[string]bool   // userID → permission → allowed
+	sessions     map[string][]*iam.Session    // userID → sessions
+	oauth2App    *oauth2AppEntry              // OAuth2 application credentials
+	socialLogins map[string]*socialLoginEntry // provider → expected response
+	loginUser    *iam.User                    // user returned by Login
+	loginTokens  *iam.TokenPair              // tokens returned by Login
 }
 
 type oauth2AppEntry struct {
 	clientID     string
 	clientSecret string
 	scopes       []string
+}
+
+type socialLoginEntry struct {
+	user   *iam.User
+	tokens *iam.TokenPair
 }
 
 // WithUser adds a fake user.
@@ -73,6 +81,21 @@ func WithPermissions(userID string, perms []string) Option {
 	}
 }
 
+// WithLoginResponse configures the response returned by Login.
+func WithLoginResponse(user *iam.User, tokens *iam.TokenPair) Option {
+	return func(s *state) {
+		s.loginUser = user
+		s.loginTokens = tokens
+	}
+}
+
+// WithSocialLogin configures the response returned by SocialLogin for a given provider.
+func WithSocialLogin(provider string, user *iam.User, tokens *iam.TokenPair) Option {
+	return func(s *state) {
+		s.socialLogins[provider] = &socialLoginEntry{user: user, tokens: tokens}
+	}
+}
+
 // WithOAuth2App configures a fake OAuth2 application for client credentials testing.
 func WithOAuth2App(clientID, clientSecret string, scopes []string) Option {
 	return func(s *state) {
@@ -87,11 +110,12 @@ func WithOAuth2App(clientID, clientSecret string, scopes []string) Option {
 // NewClient creates an *iam.Client with all services wired to in-memory fakes.
 func NewClient(opts ...Option) *iam.Client {
 	s := &state{
-		users:       make(map[string]*iam.User),
-		tenants:     make(map[string]*iam.Tenant),
-		tenantSlugs: make(map[string]string),
-		permissions: make(map[string]map[string]bool),
-		sessions:    make(map[string][]*iam.Session),
+		users:        make(map[string]*iam.User),
+		tenants:      make(map[string]*iam.Tenant),
+		tenantSlugs:  make(map[string]string),
+		permissions:  make(map[string]map[string]bool),
+		sessions:     make(map[string][]*iam.Session),
+		socialLogins: make(map[string]*socialLoginEntry),
 	}
 	for _, o := range opts {
 		o(s)
@@ -102,6 +126,7 @@ func NewClient(opts ...Option) *iam.Client {
 	u := &fakeUserService{s: s}
 	t := &fakeTenantService{s: s}
 	ss := &fakeSessionService{s: s}
+	auth := &fakeAuthService{s: s}
 
 	clientOpts := []iam.Option{
 		iam.WithTokenVerifier(v),
@@ -109,6 +134,7 @@ func NewClient(opts ...Option) *iam.Client {
 		iam.WithUserService(u),
 		iam.WithTenantService(t),
 		iam.WithSessionService(ss),
+		iam.WithAuthService(auth),
 	}
 
 	if s.oauth2App != nil {
@@ -341,6 +367,39 @@ func (f *fakeOAuth2Exchanger) GetCachedToken(ctx context.Context) (string, error
 		return "", err
 	}
 	return token.AccessToken, nil
+}
+
+// --- AuthService ---
+
+type fakeAuthService struct{ s *state }
+
+func (f *fakeAuthService) Login(_ context.Context, _ iam.LoginRequest) (*iam.LoginResponse, error) {
+	f.s.mu.RLock()
+	defer f.s.mu.RUnlock()
+
+	if f.s.loginUser == nil {
+		return nil, fmt.Errorf("iam/fake: no login response configured — use WithLoginResponse")
+	}
+	tokens := f.s.loginTokens
+	if tokens == nil {
+		tokens = &iam.TokenPair{TokenType: "Bearer"}
+	}
+	return &iam.LoginResponse{User: f.s.loginUser, Tokens: tokens}, nil
+}
+
+func (f *fakeAuthService) SocialLogin(_ context.Context, req iam.SocialLoginRequest) (*iam.LoginResponse, error) {
+	f.s.mu.RLock()
+	defer f.s.mu.RUnlock()
+
+	entry, ok := f.s.socialLogins[req.Provider]
+	if !ok {
+		return nil, fmt.Errorf("iam/fake: no social login response configured for provider %q — use WithSocialLogin", req.Provider)
+	}
+	tokens := entry.tokens
+	if tokens == nil {
+		tokens = &iam.TokenPair{TokenType: "Bearer"}
+	}
+	return &iam.LoginResponse{User: entry.user, Tokens: tokens}, nil
 }
 
 // ContextWithUserID returns a context with the user ID set.

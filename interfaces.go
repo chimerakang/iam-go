@@ -76,4 +76,10 @@ type AuthService interface {
 	// Login authenticates a user with email and password.
 	// Returns the authenticated user and token pair.
 	Login(ctx context.Context, req LoginRequest) (*LoginResponse, error)
+
+	// SocialLogin authenticates a user via a third-party OAuth2 provider.
+	// The caller is responsible for obtaining the id_token from the provider.
+	// Typical use case: BFF pattern where the backend exchanges the authorization
+	// code for an id_token (requires client secret), then calls Valhalla to get a JWT.
+	SocialLogin(ctx context.Context, req SocialLoginRequest) (*LoginResponse, error)
 }

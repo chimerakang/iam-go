@@ -275,3 +275,104 @@ func TestOAuth2_NotConfigured(t *testing.T) {
 		t.Error("OAuth2() should be nil when no OAuth2App is configured")
 	}
 }
+
+// --- AuthService ---
+
+func TestAuth_Login(t *testing.T) {
+	user := &iam.User{ID: "u1", Email: "alice@example.com", TenantID: "t1"}
+	tokens := &iam.TokenPair{AccessToken: "access_tok", RefreshToken: "refresh_tok", TokenType: "Bearer"}
+
+	c := fake.NewClient(fake.WithLoginResponse(user, tokens))
+
+	resp, err := c.Auth().Login(context.Background(), iam.LoginRequest{Email: "alice@example.com", Password: "pass"})
+	if err != nil {
+		t.Fatalf("Login() error: %v", err)
+	}
+	if resp.User.ID != "u1" {
+		t.Errorf("User.ID = %q, want %q", resp.User.ID, "u1")
+	}
+	if resp.Tokens.AccessToken != "access_tok" {
+		t.Errorf("AccessToken = %q, want %q", resp.Tokens.AccessToken, "access_tok")
+	}
+}
+
+func TestAuth_Login_NotConfigured(t *testing.T) {
+	c := fake.NewClient()
+	_, err := c.Auth().Login(context.Background(), iam.LoginRequest{})
+	if err == nil {
+		t.Fatal("expected error when no login response configured")
+	}
+}
+
+func TestAuth_SocialLogin_Google(t *testing.T) {
+	user := &iam.User{ID: "g1", Email: "guser@gmail.com", TenantID: "t1"}
+	tokens := &iam.TokenPair{AccessToken: "google_access", TokenType: "Bearer"}
+
+	c := fake.NewClient(fake.WithSocialLogin("google", user, tokens))
+
+	resp, err := c.Auth().SocialLogin(context.Background(), iam.SocialLoginRequest{
+		Provider: "google",
+		IDToken:  "google_id_token",
+		AppID:    "app_123",
+	})
+	if err != nil {
+		t.Fatalf("SocialLogin(google) error: %v", err)
+	}
+	if resp.User.ID != "g1" {
+		t.Errorf("User.ID = %q, want %q", resp.User.ID, "g1")
+	}
+	if resp.Tokens.AccessToken != "google_access" {
+		t.Errorf("AccessToken = %q, want %q", resp.Tokens.AccessToken, "google_access")
+	}
+}
+
+func TestAuth_SocialLogin_Apple(t *testing.T) {
+	user := &iam.User{ID: "a1", Email: "auser@privaterelay.appleid.com", TenantID: "t1"}
+	tokens := &iam.TokenPair{AccessToken: "apple_access", TokenType: "Bearer"}
+
+	c := fake.NewClient(fake.WithSocialLogin("apple", user, tokens))
+
+	resp, err := c.Auth().SocialLogin(context.Background(), iam.SocialLoginRequest{
+		Provider: "apple",
+		IDToken:  "apple_id_token",
+		Nonce:    "nonce_apple",
+		AppID:    "app_123",
+	})
+	if err != nil {
+		t.Fatalf("SocialLogin(apple) error: %v", err)
+	}
+	if resp.User.ID != "a1" {
+		t.Errorf("User.ID = %q, want %q", resp.User.ID, "a1")
+	}
+}
+
+func TestAuth_SocialLogin_LINE(t *testing.T) {
+	user := &iam.User{ID: "l1", Email: "luser@line.me", TenantID: "t1"}
+	tokens := &iam.TokenPair{AccessToken: "line_access", TokenType: "Bearer"}
+
+	c := fake.NewClient(fake.WithSocialLogin("line", user, tokens))
+
+	resp, err := c.Auth().SocialLogin(context.Background(), iam.SocialLoginRequest{
+		Provider: "line",
+		IDToken:  "line_id_token",
+		Nonce:    "nonce_line",
+		AppID:    "app_123",
+	})
+	if err != nil {
+		t.Fatalf("SocialLogin(line) error: %v", err)
+	}
+	if resp.User.ID != "l1" {
+		t.Errorf("User.ID = %q, want %q", resp.User.ID, "l1")
+	}
+}
+
+func TestAuth_SocialLogin_UnknownProvider(t *testing.T) {
+	c := fake.NewClient()
+	_, err := c.Auth().SocialLogin(context.Background(), iam.SocialLoginRequest{
+		Provider: "facebook",
+		IDToken:  "some_token",
+	})
+	if err == nil {
+		t.Fatal("expected error for unconfigured provider")
+	}
+}

@@ -3,11 +3,14 @@ package valhalla
 import (
 	"context"
 	"crypto/rsa"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	iam "github.com/chimerakang/iam-go"
 	iamv1 "github.com/chimerakang/iam-go/proto/iam/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -211,6 +214,97 @@ func TestRoleConversion(t *testing.T) {
 		t.Error("❌ 角色名稱轉換失敗")
 	} else {
 		t.Log("✅ 角色轉換成功")
+	}
+}
+
+// TestSocialLogin_Providers tests SocialLogin HTTP calls for google, apple, and line.
+func TestSocialLogin_Providers(t *testing.T) {
+	tests := []struct {
+		provider string
+		nonce    string
+	}{
+		{"google", ""},
+		{"apple", "nonce_apple"},
+		{"line", "nonce_line"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				expectedPath := "/api/v1/auth/social/" + tt.provider
+				if r.URL.Path != expectedPath {
+					t.Errorf("path = %q, want %q", r.URL.Path, expectedPath)
+				}
+				if r.Method != http.MethodPost {
+					t.Errorf("method = %q, want POST", r.Method)
+				}
+				if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+
+				var body socialLoginRequestBody
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode body: %v", err)
+				}
+				if body.Provider != tt.provider {
+					t.Errorf("body.Provider = %q, want %q", body.Provider, tt.provider)
+				}
+				if body.Nonce != tt.nonce {
+					t.Errorf("body.Nonce = %q, want %q", body.Nonce, tt.nonce)
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(loginResponseBody{
+					User: &loginUser{
+						ID:       "uid-" + tt.provider,
+						Email:    tt.provider + "@example.com",
+						TenantID: "t1",
+					},
+					Tokens: &loginTokens{
+						AccessToken: tt.provider + "_access",
+						TokenType:   "Bearer",
+					},
+				})
+			}))
+			defer server.Close()
+
+			svc := &valhallaAuthService{
+				httpClient: &http.Client{},
+				baseURL:    server.URL,
+			}
+
+			resp, err := svc.SocialLogin(context.Background(), iam.SocialLoginRequest{
+				Provider: tt.provider,
+				IDToken:  tt.provider + "_id_token",
+				Nonce:    tt.nonce,
+				AppID:    "app_123",
+			})
+			if err != nil {
+				t.Fatalf("SocialLogin() error: %v", err)
+			}
+			if resp.User.ID != "uid-"+tt.provider {
+				t.Errorf("User.ID = %q, want %q", resp.User.ID, "uid-"+tt.provider)
+			}
+			if resp.Tokens.AccessToken != tt.provider+"_access" {
+				t.Errorf("AccessToken = %q, want %q", resp.Tokens.AccessToken, tt.provider+"_access")
+			}
+		})
+	}
+}
+
+func TestSocialLogin_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	svc := &valhallaAuthService{httpClient: &http.Client{}, baseURL: server.URL}
+	_, err := svc.SocialLogin(context.Background(), iam.SocialLoginRequest{
+		Provider: "google",
+		IDToken:  "bad_token",
+	})
+	if err == nil {
+		t.Fatal("expected error on HTTP 401")
 	}
 }
 

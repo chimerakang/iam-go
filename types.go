@@ -77,6 +77,18 @@ type LoginResponse struct {
 	Tokens *TokenPair   // Access and refresh tokens
 }
 
+// SocialLoginRequest holds parameters for social OAuth login.
+// The caller is responsible for obtaining the id_token from the provider.
+// Typical use case: BFF pattern where the backend exchanges the authorization
+// code for an id_token (requires client secret), then calls Valhalla to get a JWT.
+type SocialLoginRequest struct {
+	Provider string // "google", "apple", "line"
+	IDToken  string // ID Token from the provider
+	Nonce    string // Replay-prevention token (required for Apple, recommended for LINE)
+	AppID    string // OAuthClientApp app_identifier (for multi-app OAuth)
+	TenantID string // Optional tenant ID
+}
+
 // TokenPair holds access and refresh tokens from authentication.
 type TokenPair struct {
 	AccessToken  string // JWT access token

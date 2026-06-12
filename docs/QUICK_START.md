@@ -10,29 +10,41 @@ go get github.com/chimerakang/iam-go
 
 ## 🚀 5 分鐘快速開始
 
-### 1. 建立 IAM 客戶端
+### 1. 一行式建立 IAM 客戶端（Valhalla）
+
+`valhalla.New()` 自動初始化 JWKS verifier（RS256 + 30s leeway）、快取 Authorizer、
+User / Tenant / Session / Auth 服務並組好 `*iam.Client` — 不需手動注入：
 
 ```go
 package main
 
 import (
     "log"
-    iam "github.com/chimerakang/iam-go"
+    "github.com/chimerakang/iam-go/valhalla"
 )
 
 func main() {
-    client, err := iam.NewClient(
-        iam.Config{
-            Endpoint: "iam-server:9000",
-            JWKSUrl:  "https://iam.example.com/.well-known/jwks.json",
-        },
-    )
+    client, err := valhalla.New("iam.example.com:50051")
     if err != nil {
         log.Fatal(err)
     }
-    defer client.Close()
+    defer client.Close() // 同時關閉 gRPC 連線
 }
 ```
+
+需要 M2M 認證或調整快取時，加上選項即可：
+
+```go
+client, err := valhalla.New("iam.example.com:50051",
+    valhalla.WithOAuth2(os.Getenv("IAM_CLIENT_ID"), os.Getenv("IAM_CLIENT_SECRET")),
+    valhalla.WithCacheTTL(time.Minute),                  // 權限快取 TTL（預設 5 分鐘，0 停用）
+    valhalla.WithClientID("my_app"),                     // Login 自動注入的 client_id
+    valhalla.WithJWKSURL("https://auth.example.com/.well-known/jwks.json"), // 覆寫預設
+)
+```
+
+> **非 Valhalla 後端？** 使用 `iam.NewClient(cfg, iam.With*()...)` 手動注入各服務實現
+> （見下方〈常見配置〉），SDK 本身與後端無關。
 
 ### 2. 驗證 JWT Token
 
@@ -66,15 +78,28 @@ if !allowed {
 permissions, err := client.Authz().GetPermissions(ctx)
 ```
 
-### 4. OAuth2 服務間認證
+### 4. OAuth2 服務間認證（M2M）
+
+`valhalla.New(..., valhalla.WithOAuth2(id, secret))` 已自動配置 exchanger
+（token URL 預設 `http://<endpoint>/api/v1/oauth/token`）：
 
 ```go
-// 使用 OAuth2 Client Credentials 取得 M2M token
+// 取得已快取的 M2M token（到期前自動刷新，singleflight 防止驚群）
 token, err := client.OAuth2().GetCachedToken(ctx)
 if err != nil {
     log.Println("Failed to get OAuth2 token:", err)
 }
-// token 是已快取的 Bearer access token，可直接附加到請求標頭
+// token 是 Bearer access token，可直接附加到請求標頭
+```
+
+自訂 token URL 時改用獨立建構函數：
+
+```go
+ex := valhalla.NewOAuth2Exchanger("client-id", "client-secret",
+    "https://auth.example.com/oauth/token",
+    oauth2.WithRefreshBuffer(2*time.Minute))
+
+client, _ := valhalla.New("iam.example.com:50051", valhalla.WithOAuth2Exchanger(ex))
 ```
 
 ## 🔌 與 Kratos 整合
@@ -279,11 +304,24 @@ requestID, _ := iam.RequestIDFromContext(ctx)
 
 ## 🛠️ 常見配置
 
-### 配置 JWKS 刷新間隔
+### 配置 JWKS 刷新間隔 / Leeway
+
+使用 `valhalla.New` 時直接傳入 jwks 選項：
 
 ```go
 import "github.com/chimerakang/iam-go/jwks"
 
+client, _ := valhalla.New("iam.example.com:50051",
+    valhalla.WithJWKSOptions(
+        jwks.WithRefreshInterval(5*time.Minute),
+        jwks.WithLeeway(30*time.Second), // 預設即 30s
+    ),
+)
+```
+
+手動組裝時：
+
+```go
 verifier := jwks.NewVerifier(
     jwksURL,
     jwks.WithRefreshInterval(5*time.Minute),
@@ -296,6 +334,16 @@ client, _ := iam.NewClient(
 ```
 
 ### 配置權限快取 TTL
+
+使用 `valhalla.New` 時：
+
+```go
+client, _ := valhalla.New("iam.example.com:50051",
+    valhalla.WithCacheTTL(time.Minute), // 0 = 停用快取，每次都打 AuthzService
+)
+```
+
+手動組裝時：
 
 ```go
 import "github.com/chimerakang/iam-go/authz"
@@ -326,9 +374,10 @@ kratosmw.RequireAny(client, "users:read", "users:admin")
 
 ## 📚 完整示例
 
-- **HTTP Service**: `examples/http-service.go`
-- **gRPC Service**: `examples/grpc-service.go`
-- **Integration Tests**: `integration_tests_example.go`
+- **標準庫 net/http**: `examples/std-http-service/`
+- **Gin**: `examples/gin-service/`
+- **Kratos (HTTP + gRPC)**: `examples/kratos-service/`
+- **純 gRPC**: `examples/grpc-service/`
 
 ## 🐳 Docker Compose 測試環境
 
@@ -350,14 +399,15 @@ docker-compose -f docker-compose.example.yml down
 
 ### Q: 我可以不使用 Kratos 嗎？
 
-**A:** 可以！iam-go 是獨立的。您可以在任何 Go 框架（Gin、Echo、標準庫等）中使用它：
+**A:** 可以！官方提供 `middleware/httpmw`（標準庫 net/http）與 `middleware/ginmw`（Gin），
+與 kratosmw 相同的 Auth / Tenant / Require / RequireAny 堆疊：
 
 ```go
-func MyHandler(w http.ResponseWriter, r *http.Request) {
-    token := r.Header.Get("Authorization")
-    claims, _ := client.Verifier().Verify(r.Context(), token)
-    // ...
-}
+// net/http
+handler := httpmw.Chain(httpmw.Auth(client), httpmw.Tenant(client))(mux)
+
+// Gin
+r.Use(ginmw.Auth(client), ginmw.Tenant(client))
 ```
 
 ### Q: 如何在多個 goroutine 中安全使用客戶端？
@@ -398,9 +448,10 @@ if err != nil {
 
 - [完整 API 文檔](../README.md)
 - [IAM Server 規格 (P0)](P0_IAM_SERVER_REQUIREMENTS.md)
-- [整合測試範例](../integration_tests_example.go)
-- [HTTP 服務範例](../examples/http-service.go)
-- [gRPC 服務範例](../examples/grpc-service.go)
+- [net/http 服務範例](../examples/std-http-service/main.go)
+- [Gin 服務範例](../examples/gin-service/main.go)
+- [Kratos 服務範例](../examples/kratos-service/main.go)
+- [gRPC 服務範例](../examples/grpc-service/main.go)
 
 ## 🆘 獲得幫助
 
@@ -414,6 +465,6 @@ if err != nil {
 
 **準備好了嗎？** 選擇一個範例開始：
 
-- 📝 [HTTP 服務](../examples/http-service.go) — 最常見的用例
-- 🔌 [gRPC 服務](../examples/grpc-service.go) — 微服務架構
-- 🧪 [整合測試](../integration_tests_example.go) — 與真實 IAM Server 測試
+- 📝 [net/http 服務](../examples/std-http-service/main.go) — 最常見的用例
+- 🍸 [Gin 服務](../examples/gin-service/main.go) — Gin 框架
+- 🔌 [gRPC 服務](../examples/grpc-service/main.go) — 微服務架構

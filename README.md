@@ -59,6 +59,19 @@ go get github.com/chimerakang/iam-go
 
 ## Quick Start
 
+### One-liner (Valhalla backend)
+
+```go
+import "github.com/chimerakang/iam-go/valhalla"
+
+client, err := valhalla.New("iam.example.com:50051",
+    valhalla.WithOAuth2(os.Getenv("IAM_CLIENT_ID"), os.Getenv("IAM_CLIENT_SECRET")), // optional M2M
+)
+// JWKS verifier, cached authorizer, user/tenant/session/auth services — all wired.
+```
+
+### Manual assembly (any backend)
+
 ```go
 package main
 

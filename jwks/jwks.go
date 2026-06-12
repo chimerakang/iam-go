@@ -25,6 +25,7 @@ type Verifier struct {
 	jwksURL         string
 	httpClient      *http.Client
 	refreshInterval time.Duration
+	leeway          time.Duration
 
 	mu        sync.RWMutex
 	keys      map[string]*rsa.PublicKey // kid → public key
@@ -48,12 +49,21 @@ func WithRefreshInterval(d time.Duration) Option {
 	return func(v *Verifier) { v.refreshInterval = d }
 }
 
+// WithLeeway sets the clock-skew tolerance applied when validating time-based
+// claims (exp, nbf, iat). Default: 30 seconds — issuers behind proxies such as
+// Cloudflare commonly drift 15-30s, and without leeway valid tokens are
+// rejected with "token is not valid yet".
+func WithLeeway(d time.Duration) Option {
+	return func(v *Verifier) { v.leeway = d }
+}
+
 // NewVerifier creates a new JWKS-based token verifier.
 func NewVerifier(jwksURL string, opts ...Option) *Verifier {
 	v := &Verifier{
 		jwksURL:         jwksURL,
 		httpClient:      http.DefaultClient,
 		refreshInterval: 1 * time.Hour,
+		leeway:          30 * time.Second,
 		keys:            make(map[string]*rsa.PublicKey),
 	}
 	for _, o := range opts {
@@ -64,7 +74,10 @@ func NewVerifier(jwksURL string, opts ...Option) *Verifier {
 
 // Verify validates a JWT token string and returns the extracted claims.
 func (v *Verifier) Verify(ctx context.Context, tokenString string) (*iam.Claims, error) {
-	parser := jwt.NewParser(jwt.WithExpirationRequired())
+	parser := jwt.NewParser(
+		jwt.WithExpirationRequired(),
+		jwt.WithLeeway(v.leeway),
+	)
 
 	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {

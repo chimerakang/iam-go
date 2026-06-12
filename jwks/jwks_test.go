@@ -276,6 +276,52 @@ func TestVerify_UnsupportedSigningMethod(t *testing.T) {
 	}
 }
 
+func TestVerify_DefaultLeewayToleratesClockSkew(t *testing.T) {
+	kid := "key-1"
+	privKey, server := testSetup(t, kid)
+	defer server.Close()
+
+	verifier := jwks.NewVerifier(server.URL)
+
+	// Issuer clock 15s ahead of ours — within the default 30s leeway.
+	now := time.Now()
+	tokenStr := signToken(t, privKey, kid, jwt.MapClaims{
+		"sub": "user-1",
+		"nbf": now.Add(15 * time.Second).Unix(),
+		"iat": now.Add(15 * time.Second).Unix(),
+		"exp": now.Add(1 * time.Hour).Unix(),
+	})
+
+	if _, err := verifier.Verify(context.Background(), tokenStr); err != nil {
+		t.Fatalf("Verify() with 15s clock skew should pass with default leeway: %v", err)
+	}
+}
+
+func TestVerify_WithLeeway(t *testing.T) {
+	kid := "key-1"
+	privKey, server := testSetup(t, kid)
+	defer server.Close()
+
+	now := time.Now()
+	tokenStr := signToken(t, privKey, kid, jwt.MapClaims{
+		"sub": "user-1",
+		"nbf": now.Add(15 * time.Second).Unix(),
+		"exp": now.Add(1 * time.Hour).Unix(),
+	})
+
+	// Leeway smaller than the skew — token must be rejected.
+	strict := jwks.NewVerifier(server.URL, jwks.WithLeeway(1*time.Second))
+	if _, err := strict.Verify(context.Background(), tokenStr); err == nil {
+		t.Fatal("Verify() with 1s leeway expected error for nbf 15s in the future, got nil")
+	}
+
+	// Leeway larger than the skew — token must pass.
+	relaxed := jwks.NewVerifier(server.URL, jwks.WithLeeway(60*time.Second))
+	if _, err := relaxed.Verify(context.Background(), tokenStr); err != nil {
+		t.Fatalf("Verify() with 60s leeway error: %v", err)
+	}
+}
+
 func TestVerify_CustomRefreshInterval(t *testing.T) {
 	kid := "key-1"
 	privKey, server := testSetup(t, kid)

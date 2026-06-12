@@ -110,6 +110,7 @@ The root package defines these interfaces — implement them to integrate with a
 | `TenantService` | Tenant resolution and membership |
 | `SessionService` | Session management |
 | `OAuth2TokenExchanger` | OAuth2 client credentials token exchange |
+| `AuthService` | User login (email/password + social OAuth) |
 
 ## Authentication Methods
 
@@ -123,6 +124,30 @@ kratosmw.Auth(client)
 ```go
 // Service-to-service authentication via OAuth2 token
 kratosmw.OAuth2ClientCredentials(client)
+```
+
+### Email / Password Login
+```go
+resp, err := client.Auth().Login(ctx, iam.LoginRequest{
+    Email:    "user@example.com",
+    Password: "secret",
+    TenantID: "tenant-uuid",
+    AppID:    "my_app",
+})
+```
+
+### Social Login — Google / Apple / LINE (BFF pattern)
+```go
+// Backend-for-Frontend: backend exchanges authorization code for id_token,
+// then calls IAM to get a Valhalla JWT.
+resp, err := client.Auth().SocialLogin(ctx, iam.SocialLoginRequest{
+    Provider: "line",          // "google", "apple", "line"
+    IDToken:  lineIDToken,     // obtained server-side from provider
+    Nonce:    sessionNonce,    // replay prevention (required for Apple / LINE)
+    AppID:    "hospital_erp_mobile",
+    TenantID: "tenant-uuid",
+})
+// resp.Tokens.AccessToken — Valhalla JWT ready to use
 ```
 
 ## Proto-first Development
@@ -145,11 +170,28 @@ func TestMyHandler(t *testing.T) {
     client := fake.NewClient(
         fake.WithUser("user1", "tenant1", "user1@test.com", []string{"admin"}),
         fake.WithPermissions("user1", []string{"users:read"}),
+        fake.WithSocialLogin("line", &iam.User{
+            ID:       "user1",
+            Email:    "user@example.com",
+            TenantID: "tenant1",
+        }, &iam.TokenPair{
+            AccessToken: "fake-jwt",
+            TokenType:   "Bearer",
+            ExpiresIn:   3600,
+        }),
     )
 
     ctx := fake.ContextWithUserID(context.Background(), "user1")
     ok, _ := client.Authz().Check(ctx, "users:read")
     // ok == true
+
+    // Test social login
+    resp, _ := client.Auth().SocialLogin(ctx, iam.SocialLoginRequest{
+        Provider: "line",
+        IDToken:  "any-token",
+        AppID:    "test_app",
+    })
+    // resp.Tokens.AccessToken == "fake-jwt"
 }
 ```
 

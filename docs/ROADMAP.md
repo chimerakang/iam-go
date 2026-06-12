@@ -76,7 +76,8 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] `TenantService` interface
 - [x] `SessionService` interface
 - [x] `OAuth2TokenExchanger` interface
-- [x] Domain types: Claims, User, Role, Tenant, Session, OAuth2Token, ListOptions
+- [x] `AuthService` interface — `Login` + `SocialLogin` (Google / Apple / LINE, #22)
+- [x] Domain types: Claims, User, Role, Tenant, Session, OAuth2Token, ListOptions, SocialLoginRequest
 
 ### P1.4 Proto Definitions
 **Priority:** Critical | **Effort:** Done | **Package:** `proto/iam/v1/`

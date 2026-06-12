@@ -25,6 +25,10 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
+      - name: Test ginmw nested module
+        working-directory: middleware/ginmw
+        run: go test -race ./...
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

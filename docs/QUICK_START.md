@@ -400,7 +400,14 @@ docker-compose -f docker-compose.example.yml down
 ### Q: 我可以不使用 Kratos 嗎？
 
 **A:** 可以！官方提供 `middleware/httpmw`（標準庫 net/http）與 `middleware/ginmw`（Gin），
-與 kratosmw 相同的 Auth / Tenant / Require / RequireAny 堆疊：
+與 kratosmw 相同的 Auth / Tenant / Require / RequireAny 堆疊。
+這些是**相容 adapter**，供既存非 proto-first 服務使用；新服務請走 proto-first Kratos（黃金路徑）。
+
+ginmw 是獨立 module（gin 依賴不會進入根模組使用者的依賴樹）：
+
+```bash
+go get github.com/chimerakang/iam-go/middleware/ginmw
+```
 
 ```go
 // net/http

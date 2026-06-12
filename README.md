@@ -26,16 +26,35 @@ The SDK is **backend-agnostic** — all services are defined as interfaces. Conc
 
 ## Framework Support
 
-The same Auth / Tenant / Require / RequireAny middleware stack is provided for each framework — pick the one matching your service:
+The same Auth / Tenant / Require / RequireAny middleware stack is provided for each framework, in two tiers:
+
+### Golden path — proto-first Kratos (new services start here)
 
 | Framework | Package | Example |
 |-----------|---------|---------|
 | Kratos (HTTP + gRPC) | `middleware/kratosmw/` | [examples/kratos-service](examples/kratos-service) |
-| Standard `net/http` (also Chi, Echo via adapters) | `middleware/httpmw/` | [examples/std-http-service](examples/std-http-service) |
-| Gin | `middleware/ginmw/` | [examples/gin-service](examples/gin-service) |
 | Pure gRPC | `middleware/grpcmw/` | [examples/grpc-service](examples/grpc-service) |
 
+New downstream services should be proto-first Kratos. Contracts live in `proto/iam/v1/`; Kratos middleware covers both HTTP and gRPC transports.
+
+### Compatibility adapters — existing non-proto-first services only
+
+| Framework | Package | Example |
+|-----------|---------|---------|
+| Standard `net/http` (also Chi, Echo via adapters) | `middleware/httpmw/` | [examples/std-http-service](examples/std-http-service) |
+| Gin | `middleware/ginmw/` | [examples/gin-service](examples/gin-service) |
+
+These exist so existing services (legacy gateways, one-off tools) can adopt official IAM middleware without a framework rewrite. **Don't start new projects on this tier.**
+
 All four share the same core logic and error semantics; only the framework adapter differs.
+
+> **ginmw is a separate Go module** so that gin (and its ~20 transitive dependencies) never enters the dependency tree of Kratos/gRPC-only services:
+>
+> ```bash
+> go get github.com/chimerakang/iam-go/middleware/ginmw
+> ```
+>
+> The root `go get github.com/chimerakang/iam-go` stays gin-free.
 
 ## Architecture
 
@@ -116,7 +135,7 @@ func main() {
 | `iam-go` (root) | Client, Config, Option pattern, interfaces, domain types, context helpers |
 | `middleware/kratosmw/` | Kratos middleware — Auth, Tenant, Require (HTTP + gRPC) |
 | `middleware/httpmw/` | Standard library net/http middleware — same stack, plus `Chain` |
-| `middleware/ginmw/` | Gin middleware — same stack as `gin.HandlerFunc` |
+| `middleware/ginmw/` | Gin middleware — same stack as `gin.HandlerFunc` (separate module: `go get github.com/chimerakang/iam-go/middleware/ginmw`) |
 | `middleware/grpcmw/` | Pure gRPC interceptors (for non-Kratos services) |
 | `authz/` | Local permission checking — claims-based `ClaimsChecker` (zero network) and caching `Authorizer`; see [docs/PERMISSION_CHECKING.md](docs/PERMISSION_CHECKING.md) |
 | `jwks/` | JWKS-based TokenVerifier (standard RFC 7517) |

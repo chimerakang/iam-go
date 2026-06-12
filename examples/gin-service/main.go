@@ -1,5 +1,11 @@
 // Example: Gin service with iam-go middleware.
 //
+// NOTE: ginmw is a COMPATIBILITY ADAPTER for existing Gin services.
+// New downstream services should be proto-first Kratos — see
+// examples/kratos-service. ginmw lives in its own Go module:
+//
+//	go get github.com/chimerakang/iam-go/middleware/ginmw
+//
 // Demonstrates:
 //   - JWT authentication via ginmw.Auth
 //   - Tenant membership validation via ginmw.Tenant

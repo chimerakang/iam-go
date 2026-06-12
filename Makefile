@@ -60,15 +60,15 @@ ci:
 		echo "  ✗ golangci-lint FAILED"; FAILED=1; \
 	fi; \
 	echo ""; \
-	echo "[4/5] go vet"; \
-	if go vet ./...; then \
+	echo "[4/5] go vet (root + nested modules)"; \
+	if go vet ./... && (cd middleware/ginmw && go vet ./...) && (cd examples/gin-service && go vet ./...); then \
 		echo "  ✓ go vet passed"; \
 	else \
 		echo "  ✗ go vet FAILED"; FAILED=1; \
 	fi; \
 	echo ""; \
-	echo "[5/5] go test -race"; \
-	if go test -race ./...; then \
+	echo "[5/5] go test -race (root + nested modules)"; \
+	if go test -race ./... && (cd middleware/ginmw && go test -race ./...); then \
 		echo "  ✓ tests passed"; \
 	else \
 		echo "  ✗ tests FAILED"; FAILED=1; \

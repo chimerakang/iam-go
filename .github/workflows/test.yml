@@ -38,6 +38,16 @@ jobs:
       - name: Run tests with coverage
         run: go test -coverprofile=coverage.out ./...
 
+      - name: Test ginmw nested module
+        working-directory: middleware/ginmw
+        run: |
+          go vet ./...
+          go test -race -v ./...
+
+      - name: Build gin-service example module
+        working-directory: examples/gin-service
+        run: go build ./...
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

@@ -135,3 +135,27 @@ func (a *Authorizer) ClearCache() {
 		return true
 	})
 }
+
+// Invalidate removes cached permission decisions for a user within a tenant.
+// Designed as a webhook target: call it when the IAM server emits a
+// permission-changed event (e.g. Valhalla's event system) so revocations take
+// effect before the cache TTL elapses.
+func (a *Authorizer) Invalidate(userID, tenantID string) {
+	prefix := userID + ":" + tenantID + ":"
+	a.invalidatePrefix(prefix)
+}
+
+// InvalidateUser removes cached permission decisions for a user across all
+// tenants. See Invalidate for the intended webhook usage.
+func (a *Authorizer) InvalidateUser(userID string) {
+	a.invalidatePrefix(userID + ":")
+}
+
+func (a *Authorizer) invalidatePrefix(prefix string) {
+	a.cache.Range(func(key, value interface{}) bool {
+		if k, ok := key.(string); ok && len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			a.cache.Delete(key)
+		}
+		return true
+	})
+}

@@ -40,10 +40,11 @@ type clientConfig struct {
 	grpcOpts  []grpc.DialOption
 	jwksURL   string
 	jwksOpts  []jwks.Option
-	clientID  string
-	exchanger iam.OAuth2TokenExchanger
-	cacheTTL  time.Duration
-	logger    *slog.Logger
+	clientID    string
+	exchanger   iam.OAuth2TokenExchanger
+	cacheTTL    time.Duration
+	remoteAuthz bool
+	logger      *slog.Logger
 }
 
 // WithGRPCDialOptions sets gRPC dial options for the Valhalla connection.
@@ -92,6 +93,14 @@ func WithOAuth2Exchanger(e iam.OAuth2TokenExchanger) ClientOption {
 // hit the Valhalla AuthzService on every check.
 func WithCacheTTL(ttl time.Duration) ClientOption {
 	return func(c *clientConfig) { c.cacheTTL = ttl }
+}
+
+// WithRemoteAuthz disables local claims-based permission checks and always
+// queries the Valhalla AuthzService (cached per WithCacheTTL). Use when
+// permission revocation must take effect before token expiry and your token
+// TTL is too long for the consistency window. See docs/PERMISSION_CHECKING.md.
+func WithRemoteAuthz() ClientOption {
+	return func(c *clientConfig) { c.remoteAuthz = true }
 }
 
 // WithLogger sets a structured logger on the assembled iam.Client.
@@ -144,13 +153,20 @@ func New(endpoint string, opts ...ClientOption) (*iam.Client, error) {
 	// adapter's internal one.
 	verifier := jwks.NewVerifier(cfg.jwksURL, cfg.jwksOpts...)
 
-	// Authorizer: cached wrapper over the Valhalla AuthzService by default.
-	authorizer := vc.Authz()
+	// Authorizer: local claims-based checks by default (zero network calls
+	// when the JWT embeds a "permissions" claim), falling back to the
+	// Valhalla AuthzService — cached per cacheTTL — for tokens without
+	// embedded permissions or flagged degraded.
+	remote := vc.Authz()
 	if cfg.cacheTTL > 0 {
-		authorizer = authz.New(
+		remote = authz.New(
 			&grpcAuthzBackend{client: vc.authzClient},
 			authz.WithCacheTTL(cfg.cacheTTL),
 		)
+	}
+	var authorizer iam.Authorizer = authz.NewClaimsChecker(authz.WithFallback(remote))
+	if cfg.remoteAuthz {
+		authorizer = remote
 	}
 
 	// Resolve a deferred WithOAuth2 exchanger now that the endpoint is known.

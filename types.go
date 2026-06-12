@@ -4,10 +4,17 @@ import "time"
 
 // Claims represents the standard claims extracted from a verified token.
 type Claims struct {
-	Subject   string
-	TenantID  string
-	Roles     []string
-	Email     string
+	Subject  string
+	TenantID string
+	Roles    []string
+	Email    string
+
+	// Permissions holds permissions embedded in the token ("permissions" claim).
+	// nil means the issuer did not embed permissions (distinct from an empty
+	// slice, which means the user has none) — local checkers should fall back
+	// to a remote check when nil.
+	Permissions []string
+
 	ExpiresAt time.Time
 	IssuedAt  time.Time
 	Issuer    string

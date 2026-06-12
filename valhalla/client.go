@@ -334,6 +334,16 @@ func (v *valhallaTokenVerifier) Verify(ctx context.Context, token string) (*iam.
 		}
 	}
 
+	// Extract embedded permissions array (Valhalla P21.2)
+	if perms, ok := claims["permissions"].([]interface{}); ok {
+		result.Permissions = make([]string, 0, len(perms))
+		for _, p := range perms {
+			if s, ok := p.(string); ok {
+				result.Permissions = append(result.Permissions, s)
+			}
+		}
+	}
+
 	// Extract timestamps
 	if exp, ok := claims["exp"].(float64); ok {
 		result.ExpiresAt = time.Unix(int64(exp), 0)
@@ -345,7 +355,8 @@ func (v *valhallaTokenVerifier) Verify(ctx context.Context, token string) (*iam.
 	// Store extra claims
 	for key, value := range claims {
 		if key != "sub" && key != "tenant_id" && key != "email" &&
-			key != "iss" && key != "roles" && key != "exp" && key != "iat" &&
+			key != "iss" && key != "roles" && key != "permissions" &&
+			key != "exp" && key != "iat" &&
 			key != "aud" && key != "nbf" && key != "jti" {
 			result.Extra[key] = value
 		}

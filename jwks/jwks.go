@@ -241,12 +241,20 @@ func mapToIAMClaims(m jwt.MapClaims) *iam.Claims {
 			}
 		}
 	}
+	if perms, ok := m["permissions"].([]interface{}); ok {
+		c.Permissions = make([]string, 0, len(perms))
+		for _, p := range perms {
+			if s, ok := p.(string); ok {
+				c.Permissions = append(c.Permissions, s)
+			}
+		}
+	}
 
 	// Non-standard claims go to Extra
 	standard := map[string]bool{
 		"sub": true, "tenant_id": true, "email": true,
 		"iss": true, "exp": true, "iat": true, "roles": true,
-		"aud": true, "nbf": true, "jti": true,
+		"permissions": true, "aud": true, "nbf": true, "jti": true,
 	}
 	for k, v := range m {
 		if !standard[k] {

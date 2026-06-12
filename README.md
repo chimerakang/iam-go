@@ -118,6 +118,7 @@ func main() {
 | `middleware/httpmw/` | Standard library net/http middleware — same stack, plus `Chain` |
 | `middleware/ginmw/` | Gin middleware — same stack as `gin.HandlerFunc` |
 | `middleware/grpcmw/` | Pure gRPC interceptors (for non-Kratos services) |
+| `authz/` | Local permission checking — claims-based `ClaimsChecker` (zero network) and caching `Authorizer`; see [docs/PERMISSION_CHECKING.md](docs/PERMISSION_CHECKING.md) |
 | `jwks/` | JWKS-based TokenVerifier (standard RFC 7517) |
 | `fake/` | In-memory implementations for testing |
 | `proto/iam/v1/` | Proto service definitions and generated gRPC stubs |

@@ -53,20 +53,32 @@ func TestNew_EmptyEndpoint(t *testing.T) {
 	}
 }
 
-func TestNew_CachedAuthorizerByDefault(t *testing.T) {
+func TestNew_ClaimsCheckerByDefault(t *testing.T) {
 	client, err := New("localhost:50051")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
 	defer func() { _ = client.Close() }()
 
-	if _, ok := client.Authz().(*authz.Authorizer); !ok {
-		t.Errorf("default Authz() = %T, want *authz.Authorizer (cached)", client.Authz())
+	if _, ok := client.Authz().(*authz.ClaimsChecker); !ok {
+		t.Errorf("default Authz() = %T, want *authz.ClaimsChecker (local-first)", client.Authz())
 	}
 }
 
-func TestNew_CacheDisabled(t *testing.T) {
-	client, err := New("localhost:50051", WithCacheTTL(0))
+func TestNew_WithRemoteAuthz(t *testing.T) {
+	client, err := New("localhost:50051", WithRemoteAuthz())
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, ok := client.Authz().(*authz.Authorizer); !ok {
+		t.Errorf("WithRemoteAuthz Authz() = %T, want *authz.Authorizer (cached remote)", client.Authz())
+	}
+}
+
+func TestNew_WithRemoteAuthzCacheDisabled(t *testing.T) {
+	client, err := New("localhost:50051", WithRemoteAuthz(), WithCacheTTL(0))
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -74,6 +86,9 @@ func TestNew_CacheDisabled(t *testing.T) {
 
 	if _, ok := client.Authz().(*authz.Authorizer); ok {
 		t.Error("WithCacheTTL(0) should bypass the caching authorizer")
+	}
+	if _, ok := client.Authz().(*authz.ClaimsChecker); ok {
+		t.Error("WithRemoteAuthz should bypass the claims checker")
 	}
 }
 

@@ -447,6 +447,7 @@ if err != nil {
 ## 📖 更多資源
 
 - [完整 API 文檔](../README.md)
+- [權限檢查：本地 vs 遠端選擇指南](PERMISSION_CHECKING.md)
 - [IAM Server 規格 (P0)](P0_IAM_SERVER_REQUIREMENTS.md)
 - [net/http 服務範例](../examples/std-http-service/main.go)
 - [Gin 服務範例](../examples/gin-service/main.go)

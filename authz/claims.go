@@ -101,6 +101,11 @@ func (c *ClaimsChecker) usableClaims(ctx context.Context) (*iam.Claims, bool) {
 	if claims == nil || claims.Permissions == nil {
 		return nil, false
 	}
+	// Check first-class PermissionsDegraded field (P21.3 canonical path).
+	if claims.PermissionsDegraded {
+		return nil, false
+	}
+	// Fallback: legacy Extra map check (supports issuers using a custom flag name).
 	if degraded, _ := claims.Extra[c.degradedFlag].(bool); degraded {
 		return nil, false
 	}

@@ -15,10 +15,18 @@ type Claims struct {
 	// to a remote check when nil.
 	Permissions []string
 
+	// PermissionsDegraded is true when the issuer could not fully resolve the
+	// permissions list (e.g. too many permissions for a single token, or a
+	// temporary resolution failure). Consumers MUST fall back to a remote
+	// permission check instead of trusting the embedded permissions.
+	// Corresponds to the "permissions_degraded" JWT claim (P21.2/P21.3).
+	PermissionsDegraded bool
+
 	ExpiresAt time.Time
 	IssuedAt  time.Time
 	Issuer    string
-	Extra     map[string]any
+	// Extra holds non-standard claims not mapped to first-class fields above.
+	Extra map[string]any
 }
 
 // User represents an authenticated user.
@@ -80,8 +88,26 @@ type LoginRequest struct {
 
 // LoginResponse contains the result of a successful authentication.
 type LoginResponse struct {
-	User   *User        // Authenticated user information
-	Tokens *TokenPair   // Access and refresh tokens
+	User   *User      // Authenticated user information
+	Tokens *TokenPair // Access and refresh tokens
+}
+
+// TenantOption represents a tenant the user is a member of.
+// Returned by TenantSelectionRequiredError when the login cannot auto-pick a tenant.
+type TenantOption struct {
+	TenantID   string
+	TenantName string
+}
+
+// TenantSelectionRequiredError is returned when a user belongs to multiple
+// tenants and neither tenant_id nor client_id was provided in the login request.
+// Callers should present AvailableTenants to the user and re-submit with TenantID set.
+type TenantSelectionRequiredError struct {
+	AvailableTenants []TenantOption
+}
+
+func (e *TenantSelectionRequiredError) Error() string {
+	return "tenant selection required: user belongs to multiple tenants"
 }
 
 // SocialLoginRequest holds parameters for social OAuth login.

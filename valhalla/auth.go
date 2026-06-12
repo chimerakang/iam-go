@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	iam "github.com/chimerakang/iam-go"
 )
@@ -98,6 +99,10 @@ func (a *valhallaAuthService) Login(ctx context.Context, req iam.LoginRequest) (
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// P21.3: FailedPrecondition (HTTP 400) with "tenant_selection_required" body.
+		if err := parseTenantSelectionError(resp.StatusCode, respBody); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -136,6 +141,39 @@ func (a *valhallaAuthService) Login(ctx context.Context, req iam.LoginRequest) (
 	}
 
 	return result, nil
+}
+
+// parseTenantSelectionError detects a P21.3 tenant_selection_required error from
+// Valhalla's gRPC-gateway response (HTTP 400, FailedPrecondition) and returns a
+// typed *iam.TenantSelectionRequiredError, or nil if the body is unrelated.
+func parseTenantSelectionError(statusCode int, body []byte) error {
+	if statusCode != http.StatusBadRequest {
+		return nil
+	}
+	// gRPC-gateway wraps the status message in {"code":N,"message":"..."}.
+	var grpcErr struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &grpcErr); err != nil {
+		return nil
+	}
+	const prefix = "tenant_selection_required: "
+	if !strings.HasPrefix(grpcErr.Message, prefix) {
+		return nil
+	}
+	payload := grpcErr.Message[len(prefix):]
+	var opts []struct {
+		TenantID   string `json:"tenant_id"`
+		TenantName string `json:"tenant_name"`
+	}
+	if err := json.Unmarshal([]byte(payload), &opts); err != nil {
+		return &iam.TenantSelectionRequiredError{}
+	}
+	tenants := make([]iam.TenantOption, len(opts))
+	for i, o := range opts {
+		tenants[i] = iam.TenantOption{TenantID: o.TenantID, TenantName: o.TenantName}
+	}
+	return &iam.TenantSelectionRequiredError{AvailableTenants: tenants}
 }
 
 // SocialLogin authenticates a user via a third-party OAuth2 provider.

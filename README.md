@@ -22,21 +22,30 @@ The SDK is **backend-agnostic** — all services are defined as interfaces. Conc
 >
 > Once your IAM server implements these, any service using `iam-go` can authenticate and authorize without vendor lock-in.
 
-**Architecture:** Kratos + Proto-first
+**Architecture:** Proto-first contracts, framework-agnostic middleware
 
-> **Architecture Rule:** This SDK is built on **go-kratos/kratos** with Proto-first API design.
-> Gin, Echo, Chi, and other HTTP frameworks are intentionally excluded.
-> Kratos middleware handles both HTTP and gRPC transports — no need for framework-specific adapters.
+## Framework Support
+
+The same Auth / Tenant / Require / RequireAny middleware stack is provided for each framework — pick the one matching your service:
+
+| Framework | Package | Example |
+|-----------|---------|---------|
+| Kratos (HTTP + gRPC) | `middleware/kratosmw/` | [examples/kratos-service](examples/kratos-service) |
+| Standard `net/http` (also Chi, Echo via adapters) | `middleware/httpmw/` | [examples/std-http-service](examples/std-http-service) |
+| Gin | `middleware/ginmw/` | [examples/gin-service](examples/gin-service) |
+| Pure gRPC | `middleware/grpcmw/` | [examples/grpc-service](examples/grpc-service) |
+
+All four share the same core logic and error semantics; only the framework adapter differs.
 
 ## Architecture
 
 ```
-Your Service (Kratos-based)
+Your Service (Kratos / net/http / Gin / gRPC)
     │
-    ├── kratosmw.Auth(client)          ← JWT verification (local, via JWKS)
-    ├── kratosmw.Tenant(client)        ← Tenant context injection
-    ├── kratosmw.Require(client, p)    ← Permission check
-    │                                    (works with both HTTP and gRPC)
+    ├── <mw>.Auth(client)              ← JWT verification (local, via JWKS)
+    ├── <mw>.Tenant(client)            ← Tenant context injection
+    ├── <mw>.Require(client, p)        ← Permission check
+    │                                    (kratosmw / httpmw / ginmw / grpcmw)
     └── client.Authz().Check()         ← Direct permission query
         client.Users().GetCurrent()
         client.OAuth2().GetCachedToken() ← OAuth2 M2M token
@@ -93,6 +102,8 @@ func main() {
 |---------|-------------|
 | `iam-go` (root) | Client, Config, Option pattern, interfaces, domain types, context helpers |
 | `middleware/kratosmw/` | Kratos middleware — Auth, Tenant, Require (HTTP + gRPC) |
+| `middleware/httpmw/` | Standard library net/http middleware — same stack, plus `Chain` |
+| `middleware/ginmw/` | Gin middleware — same stack as `gin.HandlerFunc` |
 | `middleware/grpcmw/` | Pure gRPC interceptors (for non-Kratos services) |
 | `jwks/` | JWKS-based TokenVerifier (standard RFC 7517) |
 | `fake/` | In-memory implementations for testing |
@@ -116,8 +127,10 @@ The root package defines these interfaces — implement them to integrate with a
 
 ### JWT Token (for end users)
 ```go
-// Kratos middleware verifies JWT via any JWKS-compliant endpoint
-kratosmw.Auth(client)
+// Middleware verifies JWT via any JWKS-compliant endpoint — pick your framework:
+kratosmw.Auth(client)                              // Kratos
+mux.Handle("/api/", httpmw.Auth(client)(handler))  // net/http
+r.Use(ginmw.Auth(client))                          // Gin
 ```
 
 ### OAuth2 Client Credentials (for services)

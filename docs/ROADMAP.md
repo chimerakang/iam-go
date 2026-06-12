@@ -115,6 +115,14 @@ Before the SDK can be used, the IAM server needs these capabilities:
 - [x] Excluded methods configuration
 - [ ] Integration tests
 
+### P2.3 net/http & Gin Middleware (#24)
+**Priority:** High | **Effort:** Done | **Packages:** `middleware/httpmw/`, `middleware/ginmw/`
+
+- [x] `httpmw` — Auth / Tenant / Require / RequireAny / Chain for standard net/http
+- [x] `ginmw` — Auth / Tenant / Require / RequireAny as `gin.HandlerFunc`
+- [x] Shared core logic in `middleware/internal/mwcore` (same semantics as kratosmw)
+- [x] Examples: `examples/std-http-service/`, `examples/gin-service/`
+
 ---
 
 ## Phase 3: Extended Features
